@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MarkAudio — Markdown Live Preview & Synchronized Audio Reader</title>
+    <!-- Offline PWA & Self-contained Zero-Network Fonts -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2563eb" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Master Application Header (Unified Single Row Across All Orientations) -->
+      <header class="app-header">
+        <!-- Zone 1: Brand & Layout Mode Switcher (Standard Left) -->
+        <div class="header-zone zone-left">
+          <div class="brand">
+            <span class="brand-name">Mark<span class="brand-accent">Audio</span></span>
+            <span class="status-badge badge-online" id="network-badge" title="Network status">Online</span>
+          </div>
+
+          <div class="header-divider"></div>
+
+          <div class="view-tabs" id="view-tabs" role="tablist" title="Change layout view">
+            <button class="tab-btn" data-view="edit" title="Markdown Editor only">
+              <span class="tab-icon" id="icon-tab-edit"></span>
+              <span class="tab-label">Edit</span>
+            </button>
+            <button class="tab-btn active" data-view="split" title="Split View (Side-by-side or Stacked)">
+              <span class="tab-icon" id="icon-tab-split"></span>
+              <span class="tab-label">Split</span>
+            </button>
+            <button class="tab-btn" data-view="preview" title="Full Preview & Zen Audio Reading">
+              <span class="tab-icon" id="icon-tab-preview"></span>
+              <span class="tab-label">Preview</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Zone 2: Audio Suite & Quick Tools (Standard Right) -->
+        <div class="header-zone zone-right">
+          <div class="tts-group">
+            <div class="voice-select-wrapper">
+              <select id="voice-select" class="select-control" title="Select Speech Synthesis Voice">
+                <option value="">Detecting voices...</option>
+              </select>
+            </div>
+
+            <div class="playback-btn-group">
+              <button id="btn-play" class="btn btn-primary" title="Play / Resume (Spacebar outside editor)">
+                <span class="btn-icon-slot" id="icon-play"></span>
+                <span class="play-label">Play</span>
+              </button>
+              <button id="btn-pause" class="btn btn-icon" title="Pause reading" disabled>
+                <span class="btn-icon-slot" id="icon-pause"></span>
+              </button>
+              <button id="btn-stop" class="btn btn-icon" title="Stop reading and reset position" disabled>
+                <span class="btn-icon-slot" id="icon-stop"></span>
+              </button>
+            </div>
+
+            <div class="rate-control-group" title="Speech playback speed">
+              <span>Speed:</span>
+              <input type="range" id="rate-slider" class="rate-slider" min="0.5" max="2.0" step="0.1" value="1.0" />
+              <span id="rate-badge" class="rate-badge">1.0x</span>
+            </div>
+
+            <button id="btn-mic" class="btn btn-mic" title="Voice Dictation (Speech to Text)">
+              <span class="btn-icon-slot" id="icon-mic"></span>
+              <span class="mic-label">Dictate</span>
+            </button>
+          </div>
+
+          <div class="header-divider"></div>
+
+          <div class="header-tools-quick">
+            <button class="btn btn-icon" id="btn-sample" title="Load Sample Markdown">
+              <span class="btn-icon-slot" id="icon-sample"></span>
+            </button>
+            <button class="btn btn-icon" id="btn-copy" title="Copy Raw Markdown">
+              <span class="btn-icon-slot" id="icon-copy"></span>
+            </button>
+            <button id="btn-sync-scroll" class="btn btn-icon active" title="Toggle Synchronized Scrolling">
+              <span class="btn-icon-slot" id="icon-sync"></span>
+            </button>
+            <button id="btn-theme" class="btn btn-icon" title="Toggle Dark / Light Theme">
+              <span class="btn-icon-slot" id="icon-theme"></span>
+            </button>
+            <button id="btn-settings" class="btn btn-icon" title="Preferences & Typography Settings">
+              <span class="btn-icon-slot" id="icon-settings"></span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Workspace (Dual Pane Layout - Pure Content, 100% Focused) -->
+      <main class="workspace view-split" id="workspace">
+        <!-- Left: Raw Markdown Editor Pane -->
+        <section class="pane pane-editor" id="pane-editor">
+          <div class="editor-container">
+            <div class="line-numbers" id="line-numbers">1</div>
+            <textarea
+              id="editor"
+              class="markdown-textarea"
+              placeholder="Type or paste Markdown here..."
+              spellcheck="false"
+            ></textarea>
+          </div>
+        </section>
+
+        <!-- Right: Live Preview & Synchronized Reader Pane -->
+        <section class="pane pane-preview" id="pane-preview">
+          <div class="preview-wrapper">
+            <div id="preview" class="preview-container"></div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Bottom Status Bar -->
+      <footer class="app-footer">
+        <div class="footer-section">
+          <div class="status-pill">
+            <span class="status-dot active" id="system-status-dot"></span>
+            <span id="system-status-text">Client Ready</span>
+            <span class="status-pill-separator">·</span>
+            <span id="speech-status-chip" class="speech-status-chip" title="Click any word in Preview to listen">Click word to listen</span>
+          </div>
+          <span class="footer-divider-dot">•</span>
+          <span id="doc-stats">Lines: 1 | Words: 0 | Chars: 0</span>
+        </div>
+
+        <div class="footer-section">
+          <span id="reading-time">Reading time: ~1 min</span>
+          <span id="active-token-info">Tokens: 0</span>
+        </div>
+      </footer>
+
+      <!-- Preferences & Settings Modal Dialog -->
+      <div id="modal-settings" class="modal-backdrop" hidden>
+        <div class="modal-card">
+          <div class="modal-header">
+            <div class="modal-title">
+              <span id="modal-icon-settings"></span>
+              <h3>Preferences & Typography</h3>
+            </div>
+            <button id="btn-close-settings" class="btn btn-icon" title="Close Settings">
+              <span id="icon-close-settings"></span>
+            </button>
+          </div>
+
+          <div class="modal-body">
+            <!-- Typography Group -->
+            <div class="settings-section">
+              <div class="settings-section-title">Typography & Fonts</div>
+              <div class="setting-item">
+                <label for="select-font-sans">Reading & Interface Font</label>
+                <select id="select-font-sans" class="select-control modal-select"></select>
+              </div>
+              <div class="setting-item">
+                <label for="select-font-mono">Editor & Code Font</label>
+                <select id="select-font-mono" class="select-control modal-select"></select>
+              </div>
+              <div class="setting-row">
+                <div class="setting-item flex-1">
+                  <label for="select-font-size">Preview Font Size</label>
+                  <select id="select-font-size" class="select-control modal-select"></select>
+                </div>
+                <div class="setting-item flex-1">
+                  <label for="select-line-height">Line Spacing</label>
+                  <select id="select-line-height" class="select-control modal-select">
+                    <option value="1.5">Compact (1.5)</option>
+                    <option value="1.75">Comfortable (1.75)</option>
+                    <option value="2.0">Relaxed (2.0)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Audio & Content Replacement Group -->
+            <div class="settings-section">
+              <div class="settings-section-title">Narration & Document Behavior</div>
+              <div class="setting-checkbox-item">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="check-auto-stop" checked />
+                  <div class="checkbox-text">
+                    <strong>Auto-stop playback on major content paste / replace</strong>
+                    <span>Stops narration immediately when pasting new content over existing text to avoid ghost audio.</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Storage & Reset -->
+            <div class="settings-section">
+              <div class="settings-section-title">Storage & Local Persistence</div>
+              <div class="storage-info-row">
+                <div class="storage-meta">
+                  <span>Storage: <strong>Local Browser Storage</strong> (100% Private)</span>
+                  <span id="storage-usage-text">Usage: ~0 KB</span>
+                </div>
+                <button id="btn-reset-settings" class="btn btn-sm">Reset Defaults</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Application Module Entry -->
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
