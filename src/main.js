@@ -80,6 +80,7 @@ const selectFontMono = document.getElementById('select-font-mono');
 const selectFontSize = document.getElementById('select-font-size');
 const selectLineHeight = document.getElementById('select-line-height');
 const checkAutoStop = document.getElementById('check-auto-stop');
+const checkVsCodeLinks = document.getElementById('check-vscode-links');
 const btnResetSettings = document.getElementById('btn-reset-settings');
 const storageUsageText = document.getElementById('storage-usage-text');
 
@@ -409,6 +410,22 @@ function initTTSControls() {
   });
 
   preview.addEventListener('click', (e) => {
+    const linkEl = e.target.closest('a');
+    if (linkEl) {
+      const href = linkEl.getAttribute('href');
+      // If native file:// link is clicked, browser blocks it due to security
+      if (href && /^file:\/\//i.test(href)) {
+        navigator.clipboard?.writeText(href).catch(() => {});
+        speechStatusChip.textContent = '📋 Copied file path to clipboard (browser blocks file:// directly)';
+        speechStatusChip.style.color = 'var(--accent-color)';
+        setTimeout(() => {
+          speechStatusChip.textContent = 'Ready';
+        }, 3500);
+      }
+      // Return so link click doesn't trigger unexpected audio playback
+      return;
+    }
+
     speechStatusChip.textContent = '🔊 Starting from here...';
     speechStatusChip.style.color = 'var(--accent-color)';
     handlePreviewClick(e);
@@ -588,6 +605,9 @@ function initSettingsModal() {
     selectFontSize.value = s.fontSize;
     selectLineHeight.value = s.lineHeight;
     checkAutoStop.checked = s.autoStopOnReplace;
+    if (checkVsCodeLinks) {
+      checkVsCodeLinks.checked = s.openFileInVsCode !== false;
+    }
 
     // Calculate approximate localStorage usage
     let totalBytes = 0;
@@ -649,10 +669,16 @@ function initSettingsModal() {
     saveSettings({ autoStopOnReplace: checkAutoStop.checked });
   });
 
+  checkVsCodeLinks?.addEventListener('change', () => {
+    saveSettings({ openFileInVsCode: checkVsCodeLinks.checked });
+    renderLivePreview();
+  });
+
   btnResetSettings?.addEventListener('click', () => {
     if (confirm('Reset all typography and preferences to defaults?')) {
       resetSettings();
       updateModalInputs();
+      renderLivePreview();
     }
   });
 }

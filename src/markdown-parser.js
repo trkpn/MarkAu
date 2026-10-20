@@ -10,6 +10,7 @@ import taskLists from 'markdown-it-task-lists';
 import katex from 'katex';
 import hljs from 'highlight.js';
 import DOMPurify from 'dompurify';
+import { getSettings } from './settings-manager.js';
 
 /**
  * Custom KaTeX plugin for markdown-it
@@ -153,13 +154,78 @@ const md = new MarkdownIt({
   }
 });
 
+// Custom link validation allowing file:// and vscode:// schemes
+const BAD_PROTO_RE = /^(vbscript|javascript):/i;
+const GOOD_DATA_RE = /^data:image\/(gif|png|jpeg|webp);/i;
+md.validateLink = (url) => {
+  const str = url.trim().toLowerCase();
+  return BAD_PROTO_RE.test(str) ? false : (str.startsWith('data:') ? GOOD_DATA_RE.test(str) : true);
+};
+
+/**
+ * Converts local file:// URLs to VS Code protocol URLs
+ * e.g. file:///c:/path/to/file.py#L511 -> vscode://file/c:/path/to/file.py:511
+ *      file:///c:/path/to/file.py#L511-L520 -> vscode://file/c:/path/to/file.py:511
+ * @param {string} url
+ * @returns {string}
+ */
+export function convertFileToVsCode(url) {
+  if (!/^file:\/\//i.test(url)) return url;
+
+  let raw = url.replace(/^file:\/\//i, '');
+  // For Windows drive paths (e.g. /c:/...), remove leading slash for clean VS Code URI
+  if (raw.startsWith('/') && /^[a-zA-Z]:/.test(raw.slice(1))) {
+    raw = raw.slice(1);
+  } else if (!raw.startsWith('/')) {
+    raw = '/' + raw;
+  }
+
+  const hashIdx = raw.indexOf('#');
+  let filePath = raw;
+  let line = '';
+
+  if (hashIdx !== -1) {
+    filePath = raw.slice(0, hashIdx);
+    const hash = raw.slice(hashIdx + 1);
+    const lineMatch = hash.match(/^L?(\d+)/i);
+    if (lineMatch) {
+      line = ':' + lineMatch[1];
+    }
+  }
+
+  return 'vscode://file' + (filePath.startsWith('/') ? '' : '/') + filePath + line;
+}
+
+// Intercept link_open to apply VS Code scheme conversion if enabled
+const defaultLinkOpen = md.renderer.rules.link_open || function (tokens, idx, options, env, self) {
+  return self.renderToken(tokens, idx, options);
+};
+
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const hrefIndex = token.attrIndex('href');
+  if (hrefIndex >= 0) {
+    const href = token.attrs[hrefIndex][1];
+    const shouldConvertToVsCode = env && typeof env.openFileInVsCode === 'boolean'
+      ? env.openFileInVsCode
+      : (getSettings().openFileInVsCode !== false);
+
+    if (shouldConvertToVsCode && /^file:\/\//i.test(href)) {
+      token.attrs[hrefIndex][1] = convertFileToVsCode(href);
+      token.attrSet('title', 'Open file in Visual Studio Code');
+    }
+  }
+  return defaultLinkOpen(tokens, idx, options, env, self);
+};
+
 // Register Plugins
 md.use(taskLists, { enabled: true, label: true, labelAfter: true });
 md.use(katexPlugin);
 
-// DOMPurify Configuration allowing KaTeX MathML and SVGs
+// DOMPurify Configuration allowing KaTeX MathML, SVGs, file:// and vscode:// URLs
 const DOMPURIFY_CONFIG = {
   USE_PROFILES: { html: true, svg: true, mathMl: true },
+  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|file|vscode):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   ADD_TAGS: [
     'math', 'semantics', 'annotation', 'mtext', 'mi', 'mo', 'mn',
     'mrow', 'msup', 'msub', 'msubsup', 'mfrac', 'mover', 'munder',
@@ -168,7 +234,7 @@ const DOMPURIFY_CONFIG = {
   ],
   ADD_ATTR: [
     'aria-hidden', 'data-word-id', 'data-math', 'data-formula',
-    'target', 'rel', 'viewBox', 'xmlns', 'fill', 'stroke',
+    'target', 'rel', 'title', 'viewBox', 'xmlns', 'fill', 'stroke',
     'stroke-width', 'stroke-linecap', 'stroke-linejoin'
   ]
 };
@@ -176,10 +242,11 @@ const DOMPURIFY_CONFIG = {
 /**
  * Converts markdown raw string to sanitized HTML
  * @param {string} markdownText
+ * @param {object} [env={}] Optional render environment
  * @returns {string} Sanitized HTML string
  */
-export function renderMarkdown(markdownText) {
+export function renderMarkdown(markdownText, env = {}) {
   if (!markdownText) return '';
-  const rawHtml = md.render(markdownText);
+  const rawHtml = md.render(markdownText, env);
   return DOMPurify.sanitize(rawHtml, DOMPURIFY_CONFIG);
 }

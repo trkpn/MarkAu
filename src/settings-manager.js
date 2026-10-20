@@ -39,7 +39,8 @@ export const DEFAULT_SETTINGS = {
   fontSize: 'md',
   lineHeight: '1.75',
   autoStopOnReplace: true, // Auto-stop TTS when user replaces document / pastes all
-  smoothScrollActive: true
+  smoothScrollActive: true,
+  openFileInVsCode: true // Auto-convert local file:/// links to vscode:// URLs
 };
 
 let currentSettings = { ...DEFAULT_SETTINGS };
