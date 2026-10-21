@@ -8,9 +8,36 @@
 import MarkdownIt from 'markdown-it';
 import taskLists from 'markdown-it-task-lists';
 import katex from 'katex';
-import hljs from 'highlight.js';
+import hljsCommon from 'highlight.js/lib/common';
 import DOMPurify from 'dompurify';
 import { getSettings } from './settings-manager.js';
+
+/**
+ * The highlighter is swappable: by default only the 36 most common languages
+ * are bundled (≈300 kB instead of ≈950 kB). "All languages" is loaded on
+ * demand the first time it is actually needed.
+ */
+let hljs = hljsCommon;
+let allLanguagesLoaded = false;
+
+/**
+ * Loads the full language set in the background.
+ * @returns {Promise<boolean>} whether the full set is now active
+ */
+export async function loadAllLanguages() {
+  if (allLanguagesLoaded) return true;
+  try {
+    // The full language set lives in its own lazily loaded chunk — it is only
+    // fetched when the user actually asks for it.
+    const module = await import('highlight.js');
+    hljs = module.default || module;
+    allLanguagesLoaded = true;
+    return true;
+  } catch (err) {
+    console.warn('Could not load all highlight.js languages:', err);
+    return false;
+  }
+}
 
 /**
  * Custom KaTeX plugin for markdown-it
@@ -114,7 +141,7 @@ function katexPlugin(md) {
         displayMode: true,
         throwOnError: false
       });
-      return `<div class="katex-block" data-math="true" data-formula="${md.utils.escapeHtml(formula)}">${rendered}</div>`;
+      return `<div class="katex-block" data-math="true" data-formula="${md.utils.escapeHtml(formula)}"${md.renderer.renderAttrs(tokens[idx])}>${rendered}</div>`;
     } catch (err) {
       return `<pre class="katex-error">${md.utils.escapeHtml(formula)}</pre>`;
     }
@@ -141,16 +168,33 @@ const md = new MarkdownIt({
   breaks: true,
   linkify: true,
   typographer: true,
-  highlight: (str, lang) => {
+  highlight: (str, lang, attrs) => {
+    const attrString = attrs || '';
+    if (getSettings().highlightMode === 'off') {
+      return `<pre class="hljs"${attrString}><code>${md.utils.escapeHtml(str)}</code></pre>`;
+    }
     if (lang && hljs.getLanguage(lang)) {
       try {
         const highlighted = hljs.highlight(str, { language: lang, ignoreIllegals: true }).value;
-        return `<pre class="hljs"><code class="language-${lang}">${highlighted}</code></pre>`;
+        return `<pre class="hljs"${attrString}><code class="language-${lang}">${highlighted}</code></pre>`;
       } catch (e) {
-        // Fallback
+        // Fallback below
       }
     }
-    return `<pre class="hljs"><code>${md.utils.escapeHtml(str)}</code></pre>`;
+    return `<pre class="hljs"${attrString}><code>${md.utils.escapeHtml(str)}</code></pre>`;
+  }
+});
+
+/**
+ * Tags every top-level block with the source line it starts on.
+ *
+ * This is what makes line-anchored synchronised scrolling possible: the
+ * preview can then be positioned on the same paragraph the editor shows.
+ */
+md.core.ruler.push('source_lines', (state) => {
+  for (const token of state.tokens) {
+    if (token.level !== 0 || !token.map || token.type === 'inline') continue;
+    token.attrSet('data-line', String(token.map[0] + 1));
   }
 });
 
@@ -159,7 +203,7 @@ const BAD_PROTO_RE = /^(vbscript|javascript):/i;
 const GOOD_DATA_RE = /^data:image\/(gif|png|jpeg|webp);/i;
 md.validateLink = (url) => {
   const str = url.trim().toLowerCase();
-  return BAD_PROTO_RE.test(str) ? false : (str.startsWith('data:') ? GOOD_DATA_RE.test(str) : true);
+  return BAD_PROTO_RE.test(str) ? false : str.startsWith('data:') ? GOOD_DATA_RE.test(str) : true;
 };
 
 /**
@@ -169,7 +213,7 @@ md.validateLink = (url) => {
  * @param {string} url
  * @returns {string}
  */
-export function convertFileToVsCode(url) {
+function convertFileToVsCode(url) {
   if (!/^file:\/\//i.test(url)) return url;
 
   let raw = url.replace(/^file:\/\//i, '');
@@ -197,24 +241,35 @@ export function convertFileToVsCode(url) {
 }
 
 // Intercept link_open to apply VS Code scheme conversion if enabled
-const defaultLinkOpen = md.renderer.rules.link_open || function (tokens, idx, options, env, self) {
-  return self.renderToken(tokens, idx, options);
-};
+const defaultLinkOpen =
+  md.renderer.rules.link_open ||
+  function (tokens, idx, options, env, self) {
+    return self.renderToken(tokens, idx, options);
+  };
 
 md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   const token = tokens[idx];
   const hrefIndex = token.attrIndex('href');
   if (hrefIndex >= 0) {
     const href = token.attrs[hrefIndex][1];
-    const shouldConvertToVsCode = env && typeof env.openFileInVsCode === 'boolean'
-      ? env.openFileInVsCode
-      : (getSettings().openFileInVsCode !== false);
+    const shouldConvertToVsCode =
+      env && typeof env.openFileInVsCode === 'boolean'
+        ? env.openFileInVsCode
+        : getSettings().openFileInVsCode !== false;
 
     if (shouldConvertToVsCode && /^file:\/\//i.test(href)) {
       token.attrs[hrefIndex][1] = convertFileToVsCode(href);
       token.attrSet('title', 'Open file in Visual Studio Code');
     }
   }
+
+  // External links open in a new tab and never leak the opener reference.
+  const finalHref = hrefIndex >= 0 ? token.attrs[hrefIndex][1] : '';
+  if (/^https?:\/\//i.test(finalHref)) {
+    token.attrSet('target', '_blank');
+    token.attrSet('rel', 'noopener noreferrer');
+  }
+
   return defaultLinkOpen(tokens, idx, options, env, self);
 };
 
@@ -225,17 +280,52 @@ md.use(katexPlugin);
 // DOMPurify Configuration allowing KaTeX MathML, SVGs, file:// and vscode:// URLs
 const DOMPURIFY_CONFIG = {
   USE_PROFILES: { html: true, svg: true, mathMl: true },
-  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|file|vscode):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  ALLOWED_URI_REGEXP:
+    /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|file|vscode):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
   ADD_TAGS: [
-    'math', 'semantics', 'annotation', 'mtext', 'mi', 'mo', 'mn',
-    'mrow', 'msup', 'msub', 'msubsup', 'mfrac', 'mover', 'munder',
-    'munderover', 'mtable', 'mtr', 'mtd', 'msqrt', 'mroot',
-    'svg', 'path', 'line', 'polygon', 'circle', 'rect'
+    'math',
+    'semantics',
+    'annotation',
+    'mtext',
+    'mi',
+    'mo',
+    'mn',
+    'mrow',
+    'msup',
+    'msub',
+    'msubsup',
+    'mfrac',
+    'mover',
+    'munder',
+    'munderover',
+    'mtable',
+    'mtr',
+    'mtd',
+    'msqrt',
+    'mroot',
+    'svg',
+    'path',
+    'line',
+    'polygon',
+    'circle',
+    'rect'
   ],
   ADD_ATTR: [
-    'aria-hidden', 'data-word-id', 'data-math', 'data-formula',
-    'target', 'rel', 'title', 'viewBox', 'xmlns', 'fill', 'stroke',
-    'stroke-width', 'stroke-linecap', 'stroke-linejoin'
+    'aria-hidden',
+    'data-word-id',
+    'data-math',
+    'data-formula',
+    'data-line',
+    'target',
+    'rel',
+    'title',
+    'viewBox',
+    'xmlns',
+    'fill',
+    'stroke',
+    'stroke-width',
+    'stroke-linecap',
+    'stroke-linejoin'
   ]
 };
 

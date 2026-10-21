@@ -1,131 +1,382 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>MarkAudio — Markdown Live Preview & Synchronized Audio Reader</title>
+    <!-- The stylesheet is linked, not imported by the script: the browser
+         renders the styled shell immediately instead of an unstyled flash. -->
+    <link rel="stylesheet" href="/src/style.css" />
     <!-- Offline PWA & Self-contained Zero-Network Fonts -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#2563eb" />
   </head>
-  <body>
-    <div id="app">
-      <!-- Master Application Header (Unified Single Row Across All Orientations) -->
-      <header class="app-header">
+  <body class="h-dvh overflow-hidden">
+    <div id="app" class="flex h-dvh flex-col overflow-hidden bg-bg font-sans text-fg">
+      <!-- Master Application Header — always a single row; controls are shed
+           by importance when the screen is too narrow (see app/toolbar.js) -->
+      <header
+        class="app-header flex h-12 shrink-0 items-center border-b border-border bg-bg-2 select-none"
+      >
         <!-- Zone 1: Brand & Layout Mode Switcher (Standard Left) -->
-        <div class="header-zone zone-left">
-          <div class="brand">
-            <span class="brand-name">Mark<span class="brand-accent">Audio</span></span>
-            <span class="status-badge badge-online" id="network-badge" title="Network status">Online</span>
+        <div class="zone-left flex items-center gap-2">
+          <div class="flex items-center gap-2 whitespace-nowrap">
+            <span class="brand-mark" aria-hidden="true">M</span>
+            <span class="brand-name text-[1.08rem] font-extrabold">
+              Mark<span class="brand-accent">Audio</span>
+            </span>
           </div>
 
-          <div class="header-divider"></div>
+          <div class="header-divider" aria-hidden="true"></div>
 
-          <div class="view-tabs" id="view-tabs" role="tablist" title="Change layout view">
-            <button class="tab-btn" data-view="edit" title="Markdown Editor only">
-              <span class="tab-icon" id="icon-tab-edit"></span>
+          <nav id="breadcrumb" class="header-breadcrumb" aria-label="Current section"></nav>
+
+          <div class="view-tabs" id="view-tabs" role="tablist" aria-label="Layout view">
+            <button
+              class="tab-btn"
+              role="tab"
+              data-view="edit"
+              aria-selected="false"
+              title="Editor only"
+            >
+              <span class="tab-icon" id="icon-tab-edit" aria-hidden="true"></span>
               <span class="tab-label">Edit</span>
             </button>
-            <button class="tab-btn active" data-view="split" title="Split View (Side-by-side or Stacked)">
-              <span class="tab-icon" id="icon-tab-split"></span>
+            <button
+              class="tab-btn"
+              role="tab"
+              data-view="split"
+              aria-selected="true"
+              title="Split view"
+            >
+              <span class="tab-icon" id="icon-tab-split" aria-hidden="true"></span>
               <span class="tab-label">Split</span>
             </button>
-            <button class="tab-btn" data-view="preview" title="Full Preview & Zen Audio Reading">
-              <span class="tab-icon" id="icon-tab-preview"></span>
+            <button
+              class="tab-btn"
+              role="tab"
+              data-view="preview"
+              aria-selected="false"
+              title="Preview only"
+            >
+              <span class="tab-icon" id="icon-tab-preview" aria-hidden="true"></span>
               <span class="tab-label">Preview</span>
             </button>
           </div>
         </div>
 
         <!-- Zone 2: Audio Suite & Quick Tools (Standard Right) -->
-        <div class="header-zone zone-right">
-          <div class="tts-group">
+        <div class="zone-right flex items-center gap-1.5">
+          <div class="tts-group flex items-center gap-1.25">
             <div class="voice-select-wrapper">
-              <select id="voice-select" class="select-control" title="Select Speech Synthesis Voice">
+              <select
+                id="voice-select"
+                class="select-control"
+                aria-label="Select speech synthesis voice"
+              >
                 <option value="">Detecting voices...</option>
               </select>
             </div>
 
-            <div class="playback-btn-group">
-              <button id="btn-play" class="btn btn-primary" title="Play / Resume (Spacebar outside editor)">
-                <span class="btn-icon-slot" id="icon-play"></span>
+            <div class="playback-btn-group flex items-center gap-1">
+              <button id="btn-play" class="btn btn-primary" title="Play / pause reading">
+                <span class="btn-icon-slot" id="icon-play" aria-hidden="true"></span>
                 <span class="play-label">Play</span>
               </button>
-              <button id="btn-pause" class="btn btn-icon" title="Pause reading" disabled>
-                <span class="btn-icon-slot" id="icon-pause"></span>
+              <button
+                id="btn-pause"
+                class="btn btn-icon"
+                title="Pause"
+                aria-label="Pause reading"
+                disabled
+              >
+                <span class="btn-icon-slot" id="icon-pause" aria-hidden="true"></span>
               </button>
-              <button id="btn-stop" class="btn btn-icon" title="Stop reading and reset position" disabled>
-                <span class="btn-icon-slot" id="icon-stop"></span>
+              <button
+                id="btn-stop"
+                class="btn btn-icon"
+                title="Stop"
+                aria-label="Stop reading"
+                disabled
+              >
+                <span class="btn-icon-slot" id="icon-stop" aria-hidden="true"></span>
               </button>
             </div>
 
-            <div class="rate-control-group" title="Speech playback speed">
+            <div class="rate-control-group" title="Playback speed">
               <span>Speed:</span>
-              <input type="range" id="rate-slider" class="rate-slider" min="0.5" max="2.0" step="0.1" value="1.0" />
+              <input
+                type="range"
+                id="rate-slider"
+                class="rate-slider"
+                min="0.5"
+                max="2.0"
+                step="0.1"
+                value="1.0"
+                aria-label="Speech playback speed"
+              />
               <span id="rate-badge" class="rate-badge">1.0x</span>
             </div>
 
-            <button id="btn-mic" class="btn btn-mic" title="Voice Dictation (Speech to Text)">
-              <span class="btn-icon-slot" id="icon-mic"></span>
+            <button
+              id="btn-mic"
+              class="btn btn-mic"
+              title="Dictation"
+              aria-label="Toggle voice dictation"
+            >
+              <span class="btn-icon-slot" id="icon-mic" aria-hidden="true"></span>
               <span class="mic-label">Dictate</span>
             </button>
           </div>
 
-          <div class="header-divider"></div>
+          <div class="header-divider" aria-hidden="true"></div>
 
-          <div class="header-tools-quick">
-            <button class="btn btn-icon" id="btn-sample" title="Load Sample Markdown">
-              <span class="btn-icon-slot" id="icon-sample"></span>
+          <div class="header-tools-quick flex items-center gap-0.5">
+            <button
+              id="btn-sample"
+              class="btn btn-icon"
+              title="Load sample"
+              aria-label="Load sample markdown"
+            >
+              <span class="btn-icon-slot" id="icon-sample" aria-hidden="true"></span>
             </button>
-            <button class="btn btn-icon" id="btn-copy" title="Copy Raw Markdown">
-              <span class="btn-icon-slot" id="icon-copy"></span>
+            <button
+              id="btn-copy"
+              class="btn btn-icon"
+              title="Copy markdown"
+              aria-label="Copy raw markdown"
+            >
+              <span class="btn-icon-slot" id="icon-copy" aria-hidden="true"></span>
             </button>
-            <button id="btn-sync-scroll" class="btn btn-icon active" title="Toggle Synchronized Scrolling">
-              <span class="btn-icon-slot" id="icon-sync"></span>
+            <button
+              id="btn-sync-scroll"
+              class="btn btn-icon active"
+              title="Sync scrolling"
+              aria-label="Toggle synchronized scrolling"
+              aria-pressed="true"
+            >
+              <span class="btn-icon-slot" id="icon-sync" aria-hidden="true"></span>
             </button>
-            <button id="btn-theme" class="btn btn-icon" title="Toggle Dark / Light Theme">
-              <span class="btn-icon-slot" id="icon-theme"></span>
+            <button
+              id="btn-split-axis"
+              class="btn btn-icon"
+              title="Panel arrangement — click to cycle Auto / Side-by-side / Stacked"
+              aria-label="Change panel arrangement"
+            >
+              <span class="btn-icon-slot" id="icon-split-axis" aria-hidden="true"></span>
             </button>
-            <button id="btn-settings" class="btn btn-icon" title="Preferences & Typography Settings">
-              <span class="btn-icon-slot" id="icon-settings"></span>
+            <button
+              id="btn-theme"
+              class="btn btn-icon"
+              title="Toggle theme"
+              aria-label="Toggle dark or light theme"
+            >
+              <span class="btn-icon-slot" id="icon-theme" aria-hidden="true"></span>
+            </button>
+            <button
+              id="btn-settings"
+              class="btn btn-icon"
+              title="Preferences"
+              aria-label="Open preferences"
+            >
+              <span class="btn-icon-slot" id="icon-settings" aria-hidden="true"></span>
             </button>
           </div>
         </div>
       </header>
 
       <!-- Main Workspace (Dual Pane Layout - Pure Content, 100% Focused) -->
-      <main class="workspace view-split" id="workspace">
+      <main
+        id="workspace"
+        class="workspace flex min-h-0 flex-1"
+        data-view="split"
+        data-axis="row"
+        style="--ma-split-ratio: 0.5"
+      >
         <!-- Left: Raw Markdown Editor Pane -->
-        <section class="pane pane-editor" id="pane-editor">
+        <section class="pane pane-editor" id="pane-editor" aria-label="Markdown editor">
+          <div
+            class="pane-toolbar flex h-9 items-center justify-between border-b border-border bg-bg-2 px-3 text-xs text-fg-2"
+          >
+            <div class="toolbar-group">
+              <button class="toolbar-btn" data-action="bold" title="Bold" aria-label="Bold">
+                <span class="btn-icon-slot" id="icon-bold" aria-hidden="true"></span>
+              </button>
+              <button class="toolbar-btn" data-action="italic" title="Italic" aria-label="Italic">
+                <span class="btn-icon-slot" id="icon-italic" aria-hidden="true"></span>
+              </button>
+              <button
+                class="toolbar-btn"
+                data-action="heading"
+                title="Heading"
+                aria-label="Insert heading"
+              >
+                <span class="btn-icon-slot" id="icon-heading" aria-hidden="true"></span>
+              </button>
+              <span class="toolbar-divider" aria-hidden="true"></span>
+              <button
+                class="toolbar-btn"
+                data-action="code"
+                title="Code"
+                aria-label="Insert code block"
+              >
+                <span class="btn-icon-slot" id="icon-code" aria-hidden="true"></span>
+              </button>
+              <button
+                class="toolbar-btn"
+                data-action="math"
+                title="Math"
+                aria-label="Insert math formula"
+              >
+                <span class="btn-icon-slot" id="icon-math" aria-hidden="true"></span>
+              </button>
+              <button
+                class="toolbar-btn"
+                data-action="table"
+                title="Table"
+                aria-label="Insert table"
+              >
+                <span class="btn-icon-slot" id="icon-table" aria-hidden="true"></span>
+              </button>
+              <button
+                class="toolbar-btn"
+                data-action="task"
+                title="Task"
+                aria-label="Insert task list"
+              >
+                <span class="btn-icon-slot" id="icon-task" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="toolbar-group">
+              <button
+                class="toolbar-btn"
+                data-action="open"
+                title="Open file"
+                aria-label="Open file"
+              >
+                <span class="btn-icon-slot" id="icon-open" aria-hidden="true"></span>
+              </button>
+              <button
+                class="toolbar-btn"
+                data-action="save"
+                title="Save file"
+                aria-label="Save file"
+              >
+                <span class="btn-icon-slot" id="icon-save" aria-hidden="true"></span>
+              </button>
+              <button
+                class="toolbar-btn"
+                data-action="clear"
+                title="Clear"
+                aria-label="Clear document"
+              >
+                <span class="btn-icon-slot" id="icon-trash" aria-hidden="true"></span>
+              </button>
+            </div>
+          </div>
+
+          <input
+            type="file"
+            id="file-input"
+            accept=".md,.markdown,.txt,text/markdown,text/plain"
+            hidden
+          />
+
           <div class="editor-container">
-            <div class="line-numbers" id="line-numbers">1</div>
+            <div class="line-numbers" id="line-numbers" aria-hidden="true">1</div>
             <textarea
               id="editor"
               class="markdown-textarea"
               placeholder="Type or paste Markdown here..."
               spellcheck="false"
+              aria-label="Markdown source"
             ></textarea>
           </div>
         </section>
 
+        <!-- Draggable divider between the two panes -->
+        <div
+          id="splitter"
+          class="splitter"
+          role="separator"
+          tabindex="0"
+          aria-orientation="vertical"
+          aria-label="Resize editor and preview panels"
+          aria-valuemin="15"
+          aria-valuemax="85"
+          aria-valuenow="50"
+        ></div>
+
         <!-- Right: Live Preview & Synchronized Reader Pane -->
-        <section class="pane pane-preview" id="pane-preview">
-          <div class="preview-wrapper">
+        <section class="pane pane-preview" id="pane-preview" aria-label="Live preview">
+          <div class="preview-wrapper" id="preview-wrapper">
             <div id="preview" class="preview-container"></div>
           </div>
+
+          <!-- Floating reading controls: the transport is far away on a phone -->
+          <div id="mini-player" class="mini-player" hidden>
+            <button id="mp-toggle" class="mp-btn" title="Pause" aria-label="Pause reading">
+              <span class="btn-icon-slot" id="icon-mp-toggle" aria-hidden="true"></span>
+            </button>
+            <button id="mp-stop" class="mp-btn" title="Stop" aria-label="Stop reading">
+              <span class="btn-icon-slot" id="icon-mp-stop" aria-hidden="true"></span>
+            </button>
+            <span id="mp-label" class="mp-label">Ready</span>
+            <div class="mp-progress" role="progressbar" aria-label="Reading progress">
+              <span id="mp-bar" class="mp-bar"></span>
+            </div>
+            <button id="mp-close" class="mp-btn" title="Hide" aria-label="Hide reading controls">
+              <span class="btn-icon-slot" id="icon-mp-close" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <!-- Document outline (table of contents) -->
+          <button
+            id="outline-toggle"
+            class="outline-toggle"
+            title="Outline"
+            aria-label="Show document outline"
+            aria-expanded="false"
+            aria-controls="outline-panel"
+          >
+            <span class="btn-icon-slot" id="icon-outline" aria-hidden="true"></span>
+          </button>
+
+          <aside id="outline-panel" class="outline-panel" hidden aria-label="Document outline">
+            <div class="outline-header">
+              <span>Outline</span>
+              <button
+                id="outline-close"
+                class="btn btn-icon"
+                title="Close"
+                aria-label="Close outline"
+              >
+                <span id="icon-outline-close" aria-hidden="true"></span>
+              </button>
+            </div>
+            <nav id="outline-list" class="outline-list"></nav>
+          </aside>
         </section>
       </main>
 
       <!-- Bottom Status Bar -->
-      <footer class="app-footer">
+      <footer
+        class="app-footer flex h-8 items-center justify-between border-t border-border bg-bg-2 px-4 text-xs text-fg-muted"
+      >
         <div class="footer-section">
           <div class="status-pill">
             <span class="status-dot active" id="system-status-dot"></span>
             <span id="system-status-text">Client Ready</span>
-            <span class="status-pill-separator">·</span>
-            <span id="speech-status-chip" class="speech-status-chip" title="Click any word in Preview to listen">Click word to listen</span>
+            <span class="status-pill-separator" aria-hidden="true">·</span>
+            <span
+              id="speech-status-chip"
+              class="speech-status-chip"
+              role="status"
+              aria-live="polite"
+              >Click word to listen</span
+            >
           </div>
-          <span class="footer-divider-dot">•</span>
+          <span class="footer-divider-dot" aria-hidden="true">•</span>
           <span id="doc-stats">Lines: 1 | Words: 0 | Chars: 0</span>
         </div>
 
@@ -137,77 +388,213 @@
 
       <!-- Preferences & Settings Modal Dialog -->
       <div id="modal-settings" class="modal-backdrop" hidden>
-        <div class="modal-card">
+        <div
+          class="modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-settings-title"
+        >
           <div class="modal-header">
             <div class="modal-title">
-              <span id="modal-icon-settings"></span>
-              <h3>Preferences & Typography</h3>
+              <span id="modal-icon-settings" aria-hidden="true"></span>
+              <h3 id="modal-settings-title">Preferences</h3>
             </div>
-            <button id="btn-close-settings" class="btn btn-icon" title="Close Settings">
-              <span id="icon-close-settings"></span>
+            <button
+              id="btn-close-settings"
+              class="btn btn-icon"
+              title="Close"
+              aria-label="Close settings"
+            >
+              <span id="icon-close-settings" aria-hidden="true"></span>
             </button>
           </div>
 
           <div class="modal-body">
-            <!-- Typography Group -->
-            <div class="settings-section">
-              <div class="settings-section-title">Typography & Fonts</div>
-              <div class="setting-item">
-                <label for="select-font-sans">Reading & Interface Font</label>
-                <select id="select-font-sans" class="select-control modal-select"></select>
-              </div>
-              <div class="setting-item">
-                <label for="select-font-mono">Editor & Code Font</label>
-                <select id="select-font-mono" class="select-control modal-select"></select>
-              </div>
-              <div class="setting-row">
-                <div class="setting-item flex-1">
-                  <label for="select-font-size">Preview Font Size</label>
-                  <select id="select-font-size" class="select-control modal-select"></select>
-                </div>
-                <div class="setting-item flex-1">
-                  <label for="select-line-height">Line Spacing</label>
-                  <select id="select-line-height" class="select-control modal-select">
-                    <option value="1.5">Compact (1.5)</option>
-                    <option value="1.75">Comfortable (1.75)</option>
-                    <option value="2.0">Relaxed (2.0)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <!-- Audio & Content Replacement Group -->
-            <div class="settings-section">
-              <div class="settings-section-title">Narration & Document Behavior</div>
-              <div class="setting-checkbox-item">
-                <label class="checkbox-label">
-                  <input type="checkbox" id="check-auto-stop" checked />
-                  <div class="checkbox-text">
-                    <strong>Auto-stop playback on major content paste / replace</strong>
-                    <span>Stops narration immediately when pasting new content over existing text to avoid ghost audio.</span>
+            <div class="settings-grid">
+              <!-- Workspace Group -->
+              <div class="settings-section">
+                <div class="settings-section-title">Workspace</div>
+                <div class="setting-item">
+                  <label id="split-axis-label">Arrangement</label>
+                  <div class="radio-card-list" role="radiogroup" aria-labelledby="split-axis-label">
+                    <label class="radio-card">
+                      <input type="radio" name="split-axis" value="row" />
+                      <span>Side by side</span>
+                    </label>
+                    <label class="radio-card">
+                      <input type="radio" name="split-axis" value="column" />
+                      <span>Stacked</span>
+                    </label>
                   </div>
-                </label>
-              </div>
-              <div class="setting-checkbox-item">
-                <label class="checkbox-label">
-                  <input type="checkbox" id="check-vscode-links" checked />
-                  <div class="checkbox-text">
-                    <strong>Open local file links in VS Code (<code>vscode://</code>)</strong>
-                    <span>Automatically converts local <code>file:///...#L...</code> links to VS Code URLs so clicking jumps directly to the file and line.</span>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            <!-- Storage & Reset -->
-            <div class="settings-section">
-              <div class="settings-section-title">Storage & Local Persistence</div>
-              <div class="storage-info-row">
-                <div class="storage-meta">
-                  <span>Storage: <strong>Local Browser Storage</strong> (100% Private)</span>
-                  <span id="storage-usage-text">Usage: ~0 KB</span>
                 </div>
-                <button id="btn-reset-settings" class="btn btn-sm">Reset Defaults</button>
+                <div class="setting-item">
+                  <label for="split-ratio-slider">Editor size</label>
+                  <div class="slider-row">
+                    <input
+                      type="range"
+                      id="split-ratio-slider"
+                      class="rate-slider"
+                      min="15"
+                      max="85"
+                      step="1"
+                      value="50"
+                      aria-label="Editor panel size in percent"
+                    />
+                    <span id="split-ratio-badge" class="rate-badge">50%</span>
+                  </div>
+                </div>
+                <div class="hint-row">
+                  <p class="hint-text">Drag the divider to resize. Double-click to reset.</p>
+                  <button id="btn-reset-layout" class="btn btn-sm">Reset</button>
+                </div>
+                <div class="setting-item">
+                  <label for="select-theme">Theme</label>
+                  <select id="select-theme" class="select-control modal-select"></select>
+                </div>
+              </div>
+
+              <!-- Fonts Group -->
+              <div class="settings-section">
+                <div class="settings-section-title">Fonts</div>
+                <div class="setting-item">
+                  <label for="select-font-ui">Interface</label>
+                  <select id="select-font-ui" class="select-control modal-select"></select>
+                </div>
+                <div class="setting-item">
+                  <label for="select-font-reading">Reading</label>
+                  <select id="select-font-reading" class="select-control modal-select"></select>
+                </div>
+                <div class="setting-item">
+                  <label for="select-font-editor">Editor</label>
+                  <select id="select-font-editor" class="select-control modal-select"></select>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-item flex-1">
+                    <label for="select-font-size">Size</label>
+                    <select id="select-font-size" class="select-control modal-select"></select>
+                  </div>
+                  <div class="setting-item flex-1">
+                    <label for="select-line-height">Spacing</label>
+                    <select id="select-line-height" class="select-control modal-select"></select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Reading Group -->
+              <div class="settings-section">
+                <div class="settings-section-title">Reading</div>
+                <div class="setting-item">
+                  <label for="select-sync-mode">Synced scrolling</label>
+                  <select id="select-sync-mode" class="select-control modal-select"></select>
+                </div>
+                <div class="setting-item">
+                  <label for="select-speech-chunk">Narration</label>
+                  <select id="select-speech-chunk" class="select-control modal-select"></select>
+                </div>
+                <div class="setting-checkbox-item">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="check-follow" checked />
+                    <div class="checkbox-text">
+                      <strong>Follow the narration</strong>
+                      <span
+                        >Scrolls the preview to the word being read. Yields as soon as you scroll by
+                        hand.</span
+                      >
+                    </div>
+                  </label>
+                </div>
+                <div class="setting-checkbox-item">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="check-remember-position" checked />
+                    <div class="checkbox-text">
+                      <strong>Remember reading position</strong>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Files Group -->
+              <div class="settings-section">
+                <div class="settings-section-title">Files</div>
+                <div class="setting-item">
+                  <label for="select-save-format">Save as</label>
+                  <select id="select-save-format" class="select-control modal-select"></select>
+                </div>
+                <div class="setting-item">
+                  <label for="select-auto-save">Auto-save</label>
+                  <select id="select-auto-save" class="select-control modal-select"></select>
+                </div>
+                <div class="setting-item">
+                  <label for="select-highlight-mode">Code highlighting</label>
+                  <select id="select-highlight-mode" class="select-control modal-select"></select>
+                </div>
+                <div class="storage-info-row">
+                  <div class="storage-meta">
+                    <span>Local browser storage</span>
+                    <span id="storage-usage-text">Usage: ~0 KB</span>
+                  </div>
+                  <button id="btn-reset-settings" class="btn btn-sm">Reset all</button>
+                </div>
+              </div>
+
+              <!-- Narration Group -->
+              <div class="settings-section">
+                <div class="settings-section-title">Narration</div>
+                <div class="setting-checkbox-item">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="check-auto-stop" checked />
+                    <div class="checkbox-text">
+                      <strong>Stop playback on change</strong>
+                      <span
+                        >No ghost audio after edits. Off: preview waits until reading ends.</span
+                      >
+                    </div>
+                  </label>
+                </div>
+                <div class="setting-checkbox-item">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="check-vscode-links" checked />
+                    <div class="checkbox-text">
+                      <strong>Open local files in VS Code</strong>
+                      <span><code>file:///…#L12</code> links open at that line.</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Shortcuts Group -->
+              <div class="settings-section">
+                <div class="settings-section-title">Shortcuts</div>
+                <div class="shortcut-list">
+                  <div class="shortcut-row">
+                    <kbd>Space</kbd>
+                    <span>Play / pause</span>
+                  </div>
+                  <div class="shortcut-row">
+                    <kbd>Esc</kbd>
+                    <span>Stop reading</span>
+                  </div>
+                  <div class="shortcut-row">
+                    <kbd>Ctrl</kbd><kbd>B</kbd>
+                    <span>Bold</span>
+                  </div>
+                  <div class="shortcut-row">
+                    <kbd>Ctrl</kbd><kbd>I</kbd>
+                    <span>Italic</span>
+                  </div>
+                  <div class="shortcut-row">
+                    <kbd>Ctrl</kbd><kbd>S</kbd>
+                    <span>Save draft</span>
+                  </div>
+                  <div class="shortcut-row">
+                    <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>
+                    <span>Editor / Split / Preview</span>
+                  </div>
+                  <div class="shortcut-row">
+                    <kbd>←</kbd><kbd>→</kbd>
+                    <span>Resize pane</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

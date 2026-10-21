@@ -21,8 +21,10 @@ const stateListeners = new Set();
  * Check if the browser supports Speech Recognition
  */
 export function isSTTSupported() {
-  return typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+  return (
+    typeof window !== 'undefined' &&
+    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
+  );
 }
 
 /**
@@ -65,7 +67,7 @@ export function setSTTLocale(locale) {
  * @param {(finalText: string, interimText: string) => void} options.onResult
  * @param {(err: any) => void} [options.onError]
  */
-export function startListening({ onResult, onError } = {}) {
+function startListening({ onResult, onError } = {}) {
   if (!isSTTSupported()) {
     const err = new Error('Speech Recognition is not supported in this browser.');
     onError?.(err);
@@ -76,8 +78,7 @@ export function startListening({ onResult, onError } = {}) {
     return;
   }
 
-  const SpeechRecognitionConstructor =
-    window.SpeechRecognition || window.webkitSpeechRecognition;
+  const SpeechRecognitionConstructor = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   // Persist in module scope and window object
   recognitionInstance = new SpeechRecognitionConstructor();
@@ -137,7 +138,7 @@ export function startListening({ onResult, onError } = {}) {
 /**
  * Stops speech recognition
  */
-export function stopListening() {
+function stopListening() {
   if (recognitionInstance) {
     try {
       recognitionInstance.stop();
@@ -183,9 +184,7 @@ export function insertTextAtCursor(textarea, textToInsert) {
   }
 
   const newValue =
-    originalValue.substring(0, startPos) +
-    insertText +
-    originalValue.substring(endPos);
+    originalValue.substring(0, startPos) + insertText + originalValue.substring(endPos);
 
   textarea.value = newValue;
 

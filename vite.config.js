@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -16,12 +17,15 @@ function swPrecachePlugin() {
       const getAllFiles = (dir, fileList = []) => {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         for (const entry of entries) {
-          const fullPath = path.resolve(dir, entry.name);
+          const fullPath = path.join(dir, entry.name);
           if (entry.isDirectory()) {
             getAllFiles(fullPath, fileList);
           } else {
             const rel = '/' + path.relative(distDir, fullPath).replace(/\\/g, '/');
-            if (!rel.endsWith('sw.js')) {
+            // The optional language set is fetched on demand — precaching it
+            // would download ~800 kB that most visitors never need.
+            const isLazyChunk = /highlight-all/.test(rel);
+            if (!rel.endsWith('sw.js') && !isLazyChunk) {
               fileList.push(rel);
             }
           }
@@ -44,14 +48,16 @@ function swPrecachePlugin() {
           `const STATIC_ASSETS = ${JSON.stringify(assetUrls, null, 2)};`
         );
         fs.writeFileSync(swDistPath, swCode, 'utf8');
-        console.log(`[SW Plugin] Timestamp: markaudio-${buildTimestamp} with ${assetUrls.length} precache assets injected into dist/sw.js`);
+        console.log(
+          `[SW Plugin] Timestamp: markaudio-${buildTimestamp} with ${assetUrls.length} precache assets injected into dist/sw.js`
+        );
       }
     }
   };
 }
 
 export default defineConfig({
-  plugins: [swPrecachePlugin()],
+  plugins: [tailwindcss(), swPrecachePlugin()],
   server: {
     port: 5173,
     open: false
@@ -60,13 +66,23 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
+        // The lazily loaded language set gets a recognisable name so the
+        // service worker can leave it out of the precache.
+        chunkFileNames(chunkInfo) {
+          const facade = chunkInfo.facadeModuleId || '';
+          if (facade.includes('highlight.js')) {
+            return 'assets/highlight-all-[hash].js';
+          }
+          return 'assets/[name]-[hash].js';
+        },
         manualChunks(id) {
           if (id.includes('katex')) {
             return 'vendor-katex';
           }
-          if (id.includes('highlight.js')) {
-            return 'vendor-highlight';
-          }
+          // highlight.js is deliberately NOT pinned to a chunk: the common
+          // language set is imported statically, while the full set is loaded
+          // on demand. Forcing both into one chunk would ship the full set
+          // to every visitor.
           if (id.includes('markdown-it') || id.includes('dompurify')) {
             return 'vendor-markdown';
           }
