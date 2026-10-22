@@ -29,6 +29,7 @@ import { initToolbar, refreshToolbarDensity } from './app/toolbar.js';
 import { initEditor, setMarkdown, loadDraft, onContentChange } from './app/editor.js';
 import { initPreview } from './app/preview.js';
 import { initControls } from './app/controls.js';
+import { initPaste } from './app/paste.js';
 import { initShortcuts } from './app/shortcuts.js';
 import { initMiniPlayer } from './app/mini-player.js';
 import { initOutline, rebuildOutline } from './app/outline.js';
@@ -105,6 +106,7 @@ function initApp() {
 
   // 3. Chrome
   initControls();
+  initPaste();
   initShortcuts();
   initMiniPlayer();
   initOutline();

@@ -212,6 +212,51 @@ export function setMarkdown(text, reason = 'replaced') {
 }
 
 /**
+ * Inserts text into the buffer the way a real paste would.
+ *
+ * The mutation goes through the normal pipeline (statistics, draft
+ * persistence, narration stop, preview re-render), so a paste from the
+ * clipboard behaves exactly like a manual one.
+ *
+ * @param {string} text
+ * @param {{ replaceDocument?: boolean }} [options] when the document is
+ *   replaced the whole buffer is swapped; otherwise the text lands at the
+ *   current selection
+ * @returns {'replaced'|'edited'} how the mutation was classified
+ */
+export function insertText(text, { replaceDocument = false } = {}) {
+  if (!text) return 'edited';
+
+  if (replaceDocument) {
+    setMarkdown(text, 'replaced');
+    return 'replaced';
+  }
+
+  const start = el.editor.selectionStart;
+  const end = el.editor.selectionEnd;
+  const reason = classifyPaste(el.editor.value.length, start, end, text.length);
+
+  pendingMutationReason = reason;
+
+  el.editor.focus();
+  el.editor.setSelectionRange(start, end);
+
+  let inserted = false;
+  try {
+    inserted = document.execCommand('insertText', false, text);
+  } catch {
+    inserted = false;
+  }
+
+  if (!inserted) {
+    el.editor.setRangeText(text, start, end, 'end');
+    el.editor.dispatchEvent(new Event('input', { bubbles: true, inputType: 'insertText' }));
+  }
+
+  return reason;
+}
+
+/**
  * Applies a formatting command around the current selection.
  *
  * `execCommand('insertText')` is used on purpose: it is the only API that

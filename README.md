@@ -6,6 +6,7 @@ A fast, lightweight and offline-capable Markdown editor with real-time text-to-s
 
 ## Features
 
+- **Paste from the clipboard:** A button next to the view tabs drops the clipboard straight into the document. In Preview mode it becomes the new document, in Editor / Split it lands at the cursor — so a new document can be read without the trip through the view switcher.
 - **Split View Editor:** Real-time Markdown preview with syntax highlighting (Highlight.js) and LaTeX math formulas (KaTeX).
 - **Synchronized Audio Reader:** Word-by-word text-to-speech highlighting using the browser's native `Intl.Segmenter` and Web Speech API.
 - **Interactive Click-to-Speak:** Click any word in the preview to start reading aloud from that exact spot. Click the empty space around the text to pause.
@@ -69,6 +70,7 @@ npm run build
 | `Ctrl`/`Cmd` + `B`                     | Bold the selection                                             |
 | `Ctrl`/`Cmd` + `I`                     | Italicise the selection                                        |
 | `Ctrl`/`Cmd` + `S`                     | Save the draft now                                             |
+| `Ctrl`/`Cmd` + `Shift` + `V`         | Paste the clipboard into the document                           |
 | `1` / `2` / `3` _(outside the editor)_ | Editor / Split / Preview view                                  |
 | `←` `→` _(splitter focused)_           | Shrink / grow the editor pane                                  |
 | `Home` / `End` _(splitter focused)_    | Jump to the minimum / maximum size                             |
@@ -100,6 +102,7 @@ src/
     ├── mini-player.js      # Floating reading controls
     ├── outline.js          # Document outline (table of contents) + breadcrumb
     ├── editor.js           # Buffer, draft persistence, paste detection, file handling
+    ├── paste.js            # Clipboard paste (button + shortcut)
     ├── preview.js          # Render pipeline, lazy tokenization, sync scrolling
     ├── controls.js         # Playback, voice, dictation, theme, network, PWA
     ├── settings-modal.js   # Preferences

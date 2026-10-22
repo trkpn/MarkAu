@@ -17,6 +17,7 @@ import { el } from './dom.js';
 import { play, pause, stop, isSpeaking, isSpeechPaused } from '../tts-engine.js';
 import { applyFormat, flushDraft } from './editor.js';
 import { setView } from './layout.js';
+import { pasteFromClipboard } from './paste.js';
 import { flushRender } from './preview.js';
 import { setMessage } from './status.js';
 
@@ -96,6 +97,25 @@ function onKeyDown(event) {
       setMessage('💾 Draft saved', { tone: 'accent', ttl: 1500 });
       return;
     }
+  }
+
+  /* ------------------------------------------------------------- paste --
+   * The browser's own paste only reaches a text field, so outside the editor
+   * the app offers its own: it drops the clipboard into the document
+   * without a trip through the view switcher.
+   */
+  if (
+    mod &&
+    event.shiftKey &&
+    !event.altKey &&
+    !inEditor &&
+    !inField &&
+    !isModalOpen() &&
+    event.key.toLowerCase() === 'v'
+  ) {
+    event.preventDefault();
+    pasteFromClipboard();
+    return;
   }
 
   /* -------------------------------------------------- playback & views --

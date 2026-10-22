@@ -1635,6 +1635,10 @@
     display: none;
   }
 
+  .app-header[data-hide-paste='true'] #btn-paste {
+    display: none;
+  }
+
   .app-header[data-hide-divider='true'] .header-divider {
     display: none;
   }

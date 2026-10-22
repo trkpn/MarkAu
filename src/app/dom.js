@@ -57,6 +57,7 @@ export const el = {
   // Header — quick tools
   btnSample: document.getElementById('btn-sample'),
   btnCopy: document.getElementById('btn-copy'),
+  btnPaste: document.getElementById('btn-paste'),
   btnSyncScroll: document.getElementById('btn-sync-scroll'),
   btnSplitAxis: document.getElementById('btn-split-axis'),
   btnTheme: document.getElementById('btn-theme'),
@@ -117,6 +118,7 @@ const ICON_MAPPINGS = {
   'icon-task': icons.task,
   'icon-sample': icons.sparkles,
   'icon-copy': icons.copy,
+  'icon-paste': icons.paste,
   'icon-trash': icons.trash,
   'icon-open': icons.open,
   'icon-save': icons.save,

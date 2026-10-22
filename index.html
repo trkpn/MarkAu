@@ -63,6 +63,17 @@
               <span class="tab-label">Preview</span>
             </button>
           </div>
+
+          <!-- Paste: drops the clipboard into the document without having to
+               leave the view you are reading in. -->
+          <button
+            id="btn-paste"
+            class="btn btn-icon"
+            title="Paste the clipboard at the cursor"
+            aria-label="Paste the clipboard at the cursor"
+          >
+            <span class="btn-icon-slot" id="icon-paste" aria-hidden="true"></span>
+          </button>
         </div>
 
         <!-- Zone 2: Audio Suite & Quick Tools (Standard Right) -->
@@ -585,6 +596,10 @@
                   <div class="shortcut-row">
                     <kbd>Ctrl</kbd><kbd>S</kbd>
                     <span>Save draft</span>
+                  </div>
+                  <div class="shortcut-row">
+                    <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>V</kbd>
+                    <span>Paste the clipboard</span>
                   </div>
                   <div class="shortcut-row">
                     <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>

@@ -14,7 +14,7 @@
  * Drop order (least important first):
  *   brand text → speed control → voice selector → tab labels →
  *   mic label → play label → sample button → copy button →
- *   brand mark → network badge
+ *   paste button → brand mark → network badge
  * ============================================================================
  */
 
@@ -37,6 +37,7 @@ export const DROP_STEPS = [
   { attr: 'hideVoice', label: 'voice selector' },
   { attr: 'hideSample', label: 'sample button' },
   { attr: 'hideCopy', label: 'copy button' },
+  { attr: 'hidePaste', label: 'paste button' },
   { attr: 'hideDivider', label: 'header dividers' },
   { attr: 'hideBrandMark', label: 'brand mark' },
   { attr: 'compactIcons', label: 'compact icon buttons' }
