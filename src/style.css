@@ -933,6 +933,186 @@
     border: 1px solid var(--ma-border);
   }
 
+  /* A code block wears a header with its language and a copy button, and a
+     gutter with the line numbers next to the code. */
+  .code-block {
+    margin: 1.2rem 0;
+    border: 1px solid var(--ma-border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--ma-code-bg);
+  }
+
+  .code-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.3rem 0.4rem 0.3rem 0.85rem;
+    border-bottom: 1px solid var(--ma-border);
+    background: var(--ma-bg-2);
+  }
+
+  .code-lang {
+    color: var(--ma-fg-muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .code-copy {
+    padding: 0.15rem 0.55rem;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ma-fg-muted);
+    font-family: var(--ma-font-ui);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .code-copy:hover {
+    background: var(--ma-bg-3);
+    color: var(--ma-fg);
+  }
+
+  .code-copy.is-copied {
+    color: var(--ma-online);
+  }
+
+  .code-body {
+    display: flex;
+    align-items: stretch;
+  }
+
+  .code-gutter {
+    flex: 0 0 auto;
+    padding: 0.9rem 0.5rem 0.9rem 0.8rem;
+    border-right: 1px solid var(--ma-border);
+    color: var(--ma-fg-muted);
+    opacity: 0.55;
+    font-family: var(--ma-font-editor);
+    font-size: 0.88rem;
+    line-height: 1.5;
+    text-align: right;
+    white-space: pre;
+    user-select: none;
+  }
+
+  .code-body pre.hljs {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+  }
+
+  /* Callouts — a blockquote that starts with [!NOTE] and friends. */
+  .callout {
+    margin: 1.2rem 0;
+    padding: 0.85rem 1rem;
+    border-left: 4px solid var(--callout-accent, var(--ma-accent));
+    border-radius: 0 8px 8px 0;
+    background: var(--ma-bg-2);
+  }
+
+  .callout-title {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0 0 0.35rem;
+    color: var(--callout-accent, var(--ma-accent));
+    font-weight: 700;
+  }
+
+  .callout > :last-child {
+    margin-bottom: 0;
+  }
+
+  .callout-note {
+    --callout-accent: var(--ma-accent);
+  }
+
+  .callout-tip {
+    --callout-accent: var(--ma-online);
+  }
+
+  .callout-important {
+    --callout-accent: var(--ma-accent-2);
+  }
+
+  .callout-warning {
+    --callout-accent: #d98b28;
+  }
+
+  .callout-caution {
+    --callout-accent: var(--ma-rec-fg);
+  }
+
+  .callout-note .callout-title::before {
+    content: 'ℹ';
+  }
+
+  .callout-tip .callout-title::before {
+    content: '💡';
+  }
+
+  .callout-important .callout-title::before {
+    content: '❗';
+  }
+
+  .callout-warning .callout-title::before {
+    content: '⚠';
+  }
+
+  .callout-caution .callout-title::before {
+    content: '🔥';
+  }
+
+  /* The permalink of a heading — it appears when the mouse is over it. */
+  .preview-container .heading-anchor {
+    margin-left: 0.4rem;
+    color: var(--ma-fg-muted);
+    font-weight: 400;
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  .preview-container .heading-anchor::before {
+    content: '#';
+  }
+
+  .preview-container :is(h1, h2, h3, h4, h5, h6):hover .heading-anchor,
+  .preview-container .heading-anchor:focus {
+    opacity: 0.75;
+  }
+
+  /* Footnotes */
+  .footnotes {
+    margin-top: 2.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--ma-border);
+    color: var(--ma-fg-2);
+    font-size: 0.9em;
+  }
+
+  .footnotes ol {
+    padding-left: 1.2rem;
+  }
+
+  .footnote-ref a,
+  .footnote-backref {
+    text-decoration: none;
+  }
+
+  .footnote-backref {
+    margin-left: 0.35rem;
+  }
+
   .preview-container :not(pre) > code {
     font-family: var(--ma-font-editor);
     font-size: 0.85em;
@@ -951,6 +1131,104 @@
     border-radius: 8px;
     text-align: center;
     overflow-x: auto;
+  }
+
+  /* Mermaid diagrams live in their own framed panel: the drawing is centred
+     and scales with the pane, and the source only appears when the diagram
+     could not be drawn. */
+  .mermaid-block {
+    margin: 1.3rem 0;
+    padding: 0.9rem;
+    background: var(--ma-bg-2);
+    border: 1px solid var(--ma-border);
+    border-radius: 8px;
+  }
+
+  .mermaid-caption {
+    margin-bottom: 0.6rem;
+    color: var(--ma-fg-2);
+    font-size: 0.9em;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .mermaid-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.15rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .mermaid-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ma-fg-muted);
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .mermaid-btn:hover {
+    background: var(--ma-bg-3);
+    color: var(--ma-fg);
+  }
+
+  .mermaid-btn[aria-pressed='true'] {
+    background: var(--ma-accent-subtle);
+    color: var(--ma-accent);
+  }
+
+  .mermaid-viewport {
+    overflow: auto;
+    max-height: 70vh;
+    cursor: grab;
+  }
+
+  .mermaid-viewport.is-panning {
+    cursor: grabbing;
+    user-select: none;
+  }
+
+  .mermaid-canvas {
+    display: flex;
+    /* `safe` keeps the left edge reachable when a zoomed diagram is wider
+       than the panel — a centred flex item would overflow out of reach. */
+    justify-content: safe center;
+  }
+
+  .mermaid-canvas svg {
+    max-width: 100%;
+    height: auto;
+    /* A flex item shrinks by default, which would undo the zoom. */
+    flex-shrink: 0;
+  }
+
+  .mermaid-source {
+    margin: 0.75rem 0 0;
+    padding: 0.9rem 1.1rem;
+    border-radius: 8px;
+    background: var(--ma-code-bg);
+    color: var(--ma-code-fg);
+    overflow-x: auto;
+    font-family: var(--ma-font-editor);
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+
+  .mermaid-error {
+    margin: 0;
+    color: var(--ma-rec-fg);
+    font-size: 0.9em;
+    white-space: pre-wrap;
   }
 
   .contains-task-list {
@@ -1627,6 +1905,10 @@
     display: none;
   }
 
+  .app-header[data-hide-print='true'] #btn-print {
+    display: none;
+  }
+
   .app-header[data-hide-sample='true'] #btn-sample {
     display: none;
   }
@@ -1636,6 +1918,10 @@
   }
 
   .app-header[data-hide-paste='true'] #btn-paste {
+    display: none;
+  }
+
+  .app-header[data-hide-reset='true'] #btn-reset {
     display: none;
   }
 
@@ -1751,8 +2037,132 @@
   }
 
   .tts-math-token.active-word {
-    background-color: var(--ma-word-bg) !important;
+    background-color: var(--ma-word-target) !important;
     outline: 2px solid var(--ma-word-border);
     border-radius: 6px;
+  }
+}
+
+/* ==========================================================================
+   Print
+   --------------------------------------------------------------------------
+   Printing shows the document and nothing else: the preview alone, in
+   ink-friendly colours, with the page breaks where they belong.
+   ========================================================================== */
+@media print {
+  /* The paper has its own height: the app is locked to one screen
+     (`100dvh`, `overflow: hidden`), which would cut the document off after
+     the first page. The body and the app shell both have to let go of
+     their height for the pages to follow each other. */
+  html,
+  body,
+  #app {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  @page {
+    margin: 18mm 16mm;
+  }
+
+  :root,
+  [data-theme='dark'] {
+    --ma-bg: #ffffff;
+    --ma-bg-2: #ffffff;
+    --ma-bg-3: #f2f3f7;
+    --ma-surface: #ffffff;
+    --ma-border: #d5d8e0;
+    --ma-fg: #171a21;
+    --ma-fg-2: #414857;
+    --ma-fg-muted: #6b7380;
+    --ma-accent: #3d4dbd;
+    --ma-accent-2: #6d3fd4;
+    --ma-accent-subtle: #eef0fd;
+    --ma-code-bg: #f6f7fa;
+    --ma-code-fg: #171a21;
+    --ma-rec-fg: #b42318;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  /* Everything that belongs to the app — and not to the document — stays
+     out of the printout: the chrome, the tools of a diagram, the outline
+     and any dialog that happens to be open. */
+  .app-header,
+  .app-footer,
+  .pane-editor,
+  .pane-toolbar,
+  .splitter,
+  .mini-player,
+  .outline-panel,
+  .outline-toggle,
+  .modal-backdrop,
+  dialog.app-dialog {
+    display: none !important;
+  }
+
+  .workspace {
+    display: block !important;
+    /* The workspace is a flex item of the page: without this it would keep
+       a base size of zero and the content would overflow its own box. */
+    flex: none !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .pane-preview {
+    display: block !important;
+    flex: none !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .preview-wrapper {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  .preview-container {
+    max-width: none !important;
+    padding: 0 !important;
+    font-size: 11pt;
+    color: #171a21;
+  }
+
+  /* The tools of a diagram are for the screen, not for the paper. */
+  .mermaid-toolbar,
+  .heading-anchor,
+  .code-copy,
+  .mermaidTooltip {
+    display: none !important;
+  }
+
+  .mermaid-block,
+  .callout,
+  .code-block,
+  .mermaid-source {
+    break-inside: avoid;
+  }
+
+  .preview-container h1,
+  .preview-container h2,
+  .preview-container h3 {
+    break-after: avoid;
+  }
+
+  .preview-container a {
+    color: #171a21;
+    text-decoration: underline;
+  }
+
+  .footnotes {
+    break-before: page;
   }
 }

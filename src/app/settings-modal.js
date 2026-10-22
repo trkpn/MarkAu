@@ -107,6 +107,9 @@ function syncInputs() {
   el.checkAutoStop.checked = settings.autoStopOnReplace;
   el.checkRememberPosition.checked = settings.rememberPosition;
   el.checkFollow.checked = settings.followWhileReading;
+  if (el.checkDiagramLabels) {
+    el.checkDiagramLabels.checked = settings.readDiagramLabels;
+  }
   if (el.checkVsCodeLinks) {
     el.checkVsCodeLinks.checked = settings.openFileInVsCode !== false;
   }
@@ -259,6 +262,11 @@ export function initSettingsModal() {
   });
   el.checkFollow?.addEventListener('change', () => {
     saveSettings({ followWhileReading: el.checkFollow.checked });
+  });
+  el.checkDiagramLabels?.addEventListener('change', () => {
+    saveSettings({ readDiagramLabels: el.checkDiagramLabels.checked });
+    // The words of the document changed, so the narration has to learn them.
+    refreshPreview();
   });
 
   // Files

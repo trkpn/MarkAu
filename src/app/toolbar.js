@@ -35,9 +35,11 @@ export const DROP_STEPS = [
   { attr: 'hidePlayLabel', label: 'play label' },
   { attr: 'hideSpeed', label: 'speed control' },
   { attr: 'hideVoice', label: 'voice selector' },
+  { attr: 'hidePrint', label: 'print button' },
   { attr: 'hideSample', label: 'sample button' },
   { attr: 'hideCopy', label: 'copy button' },
   { attr: 'hidePaste', label: 'paste button' },
+  { attr: 'hideReset', label: 'reset button' },
   { attr: 'hideDivider', label: 'header dividers' },
   { attr: 'hideBrandMark', label: 'brand mark' },
   { attr: 'compactIcons', label: 'compact icon buttons' }

@@ -390,13 +390,78 @@ function toHtml(markdown) {
          font: 16px/1.75 system-ui, sans-serif; color: #0f172a; }
   pre { background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow-x: auto; }
   code { font-family: ui-monospace, monospace; }
+  .mermaid-block { margin: 1.3rem 0; padding: 0.9rem; background: #f4f5f8;
+                   border: 1px solid #e2e4ec; border-radius: 8px; }
+  .mermaid-caption { margin-bottom: 0.6rem; color: #475569; font-size: 0.9em;
+                     font-weight: 600; text-align: center; }
+  .mermaid-canvas { display: flex; justify-content: center; }
+  .mermaid-canvas svg { max-width: 100%; height: auto; }
+  .mermaid-source { margin: 0.75rem 0 0; }
+  .code-block { margin: 1.2rem 0; border: 1px solid #e2e4ec; border-radius: 8px;
+                overflow: hidden; }
+  .code-head { display: flex; justify-content: space-between; padding: 0.3rem 0.85rem;
+               border-bottom: 1px solid #e2e4ec; background: #f4f5f8;
+               color: #64748b; font-size: 0.72rem; text-transform: uppercase; }
+  .code-body { display: flex; }
+  .code-gutter { padding: 1rem 0.5rem 1rem 0.8rem; border-right: 1px solid #e2e4ec;
+                 color: #94a3b8; font-size: 0.88rem; line-height: 1.5; text-align: right;
+                 white-space: pre; }
+  .code-body pre { border-radius: 0; margin: 0; flex: 1 1 auto; }
+  .callout { margin: 1.2rem 0; padding: 0.85rem 1rem; border-left: 4px solid #4c5fd7;
+             background: #f4f5f8; }
+  .callout-title { margin: 0 0 0.35rem; color: #4c5fd7; font-weight: 700; }
+  .callout-tip { border-color: #16a06a; }
+  .callout-tip .callout-title { color: #16a06a; }
+  .callout-warning { border-color: #d98b28; }
+  .callout-warning .callout-title { color: #b06d12; }
+  .callout-caution { border-color: #d4453f; }
+  .callout-caution .callout-title { color: #d4453f; }
+  .footnotes { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid #e2e4ec;
+               color: #475569; font-size: 0.9em; }
+  .heading-anchor { display: none; }
 </style>
 </head>
 <body>
-${renderMarkdown(markdown)}
+${withRenderedDiagrams(renderMarkdown(markdown))}
 </body>
 </html>
 `;
+}
+
+/**
+ * Puts the drawn diagrams into the exported HTML.
+ *
+ * The export is rendered from the Markdown source, so it only contains the
+ * diagram placeholders. The SVG that is currently drawn in the preview is
+ * copied in — and when there is no drawing (a diagram that could not be
+ * parsed, or a preview that is out of date) the source code is revealed
+ * instead of shipping an empty box.
+ * @param {string} html
+ * @returns {string}
+ */
+function withRenderedDiagrams(html) {
+  const blocks = Array.from(el.preview.querySelectorAll('.mermaid-block'));
+  if (blocks.length === 0) return html;
+
+  // The drawings of the preview, in the order of the document.
+  const drawings = blocks.map((block) => {
+    const content = block.querySelector('.mermaid-canvas')?.innerHTML?.trim() ?? '';
+    return content.includes('<svg') ? content : '';
+  });
+
+  let canvasIndex = 0;
+  const withDrawings = html.replace(/<div class="mermaid-canvas"><\/div>/g, (match) => {
+    const drawing = drawings[canvasIndex++] ?? '';
+    return drawing ? `<div class="mermaid-canvas">${drawing}</div>` : match;
+  });
+
+  // A diagram that is not drawn shows its source instead of an empty box.
+  let sourceIndex = 0;
+  return withDrawings.replace(/<pre class="mermaid-source"([^>]*)>/g, (match, attributes) => {
+    const drawing = drawings[sourceIndex++] ?? '';
+    if (drawing) return match;
+    return `<pre class="mermaid-source"${attributes.replace(/\shidden(=(""|''))?/, '')}>`;
+  });
 }
 
 /* ==========================================================================
@@ -445,6 +510,9 @@ export function initEditor(handlers = {}) {
 
   el.btnSample?.addEventListener('click', () => handlers.onSample?.());
   el.btnCopy?.addEventListener('click', () => handlers.onCopy?.());
+  // The reset button in the header empties the document, just like the
+  // toolbar button of the editor.
+  el.btnReset?.addEventListener('click', () => handlers.onClear?.());
 
   // Opening a file through the picker
   el.fileInput?.addEventListener('change', (event) => {

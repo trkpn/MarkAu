@@ -1,16 +1,25 @@
 /**
  * Markdown Engine Specification:
  * - Markdown-it with CommonMark + GFM (Tables, Task lists, Strikethrough, Autolinks)
+ * - Footnotes and emoji shortcodes
+ * - GitHub-style callouts (`> [!NOTE]`) and linkable headings
  * - LaTeX Math rendering via KaTeX ($inline$ & $$block$$)
  * - Code Syntax Highlighting via Highlight.js
+ * - Mermaid diagrams (```mermaid fences) — the source is emitted here, the
+ *   diagram itself is drawn by `mermaid-renderer.js`
  * - XSS Sanitization via DOMPurify preserving KaTeX MathML, SVG, and TTS token attributes
  */
 import MarkdownIt from 'markdown-it';
 import taskLists from 'markdown-it-task-lists';
+import footnote from 'markdown-it-footnote';
+import { bare as emoji } from 'markdown-it-emoji';
+import emojiDefs from 'markdown-it-emoji/lib/data/full.mjs';
+import emojiShortcuts from 'markdown-it-emoji/lib/data/shortcuts.mjs';
 import katex from 'katex';
 import hljsCommon from 'highlight.js/lib/common';
 import DOMPurify from 'dompurify';
 import { getSettings } from './settings-manager.js';
+import { parseFrontmatter } from './frontmatter.js';
 
 /**
  * The highlighter is swappable: by default only the 36 most common languages
@@ -161,6 +170,173 @@ function katexPlugin(md) {
   };
 }
 
+/**
+ * The callout kinds and their titles.
+ */
+const CALLOUT_KINDS = {
+  note: 'Note',
+  tip: 'Tip',
+  important: 'Important',
+  warning: 'Warning',
+  caution: 'Caution'
+};
+
+/**
+ * GitHub-style callouts.
+ *
+ * A blockquote that starts with `[!NOTE]` (or any other kind) becomes a
+ * coloured panel with a title, the way GitHub and Obsidian render them.
+ */
+function calloutPlugin(md) {
+  md.core.ruler.after('inline', 'callouts', (state) => {
+    const tokens = state.tokens;
+    let index = 0;
+
+    while (index < tokens.length) {
+      const open = tokens[index];
+
+      if (open.type !== 'blockquote_open') {
+        index++;
+        continue;
+      }
+
+      const paragraphOpen = tokens[index + 1];
+      const inline = tokens[index + 2];
+      const paragraphClose = tokens[index + 3];
+      const close = tokens[index + 4];
+
+      const isSimpleBlockquote =
+        paragraphOpen?.type === 'paragraph_open' &&
+        inline?.type === 'inline' &&
+        paragraphClose?.type === 'paragraph_close' &&
+        close?.type === 'blockquote_close';
+
+      if (!isSimpleBlockquote) {
+        index++;
+        continue;
+      }
+
+      // The marker sits on its own line — the line break after it is part of
+      // the marker, not of the text.
+      const match = inline.content.match(/^\[!(\w+)\][ \t]*\r?\n?/);
+      const kind = match?.[1]?.toLowerCase();
+
+      if (!kind || !CALLOUT_KINDS[kind]) {
+        index++;
+        continue;
+      }
+
+      // The marker is the beginning of the first text run — take it off.
+      const first = inline.children?.[0];
+      if (first?.type === 'text') {
+        first.content = first.content.slice(match[0].length);
+        if (!first.content) inline.children.shift();
+      }
+
+      // The line break that followed the marker belongs to the marker.
+      while (
+        inline.children?.[0] &&
+        (inline.children[0].type === 'softbreak' ||
+          (inline.children[0].type === 'text' && !inline.children[0].content))
+      ) {
+        inline.children.shift();
+      }
+
+      open.type = 'callout_open';
+      open.tag = 'div';
+      open.attrJoin('class', `callout callout-${kind}`);
+      close.type = 'callout_close';
+      close.tag = 'div';
+
+      // The title of the callout.
+      const titleOpen = new state.Token('callout_title_open', 'p', 1);
+      titleOpen.attrJoin('class', 'callout-title');
+      const titleText = new state.Token('text', '', 0);
+      titleText.content = CALLOUT_KINDS[kind];
+      const titleInline = new state.Token('inline', '', 0);
+      titleInline.content = CALLOUT_KINDS[kind];
+      titleInline.children = [titleText];
+      const titleClose = new state.Token('callout_title_close', 'p', -1);
+
+      tokens.splice(index + 1, 0, titleOpen, titleInline, titleClose);
+      index += 6;
+    }
+  });
+
+  md.renderer.rules.callout_open = (tokens, idx) =>
+    `<div class="${tokens[idx].attrGet('class') || 'callout'}">\n`;
+  md.renderer.rules.callout_close = () => `</div>\n`;
+  md.renderer.rules.callout_title_open = (tokens, idx) =>
+    `<p class="${tokens[idx].attrGet('class') || 'callout-title'}">`;
+  md.renderer.rules.callout_title_close = () => `</p>\n`;
+}
+
+/**
+ * Turns a heading into a link to itself.
+ *
+ * The permalink is what makes a heading shareable: the reader can copy the
+ * address of the exact section they are looking at.
+ */
+function headingAnchorPlugin(md) {
+  md.core.ruler.after('inline', 'heading_anchors', (state) => {
+    // The slugs are counted per render: the same document must always get
+    // the same ids, or a permalink would stop working after an edit.
+    const used = new Map();
+
+    for (let index = 0; index < state.tokens.length; index++) {
+      const token = state.tokens[index];
+      if (token.type !== 'heading_open') continue;
+
+      const inline = state.tokens[index + 1];
+      if (!inline || inline.type !== 'inline') continue;
+
+      const text = inline.children
+        .filter((child) => child.type === 'text' || child.type === 'code_inline')
+        .map((child) => child.content)
+        .join('')
+        .trim();
+
+      const base = slugify(text);
+      const seen = used.get(base) || 0;
+      used.set(base, seen + 1);
+      const slug = seen === 0 ? base : `${base}-${seen + 1}`;
+
+      token.attrSet('id', slug);
+
+      const link = new state.Token('link_open', 'a', 1);
+      link.attrSet('href', `#${slug}`);
+      link.attrSet('class', 'heading-anchor');
+      link.attrSet('aria-label', `Link to “${text}”`);
+
+      // The sign of the permalink comes from the stylesheet, so the heading
+      // keeps its plain text — the outline and the breadcrumb read it.
+      const marker = new state.Token('text', '', 0);
+      marker.content = '';
+
+      const close = new state.Token('link_close', 'a', -1);
+
+      inline.children.push(link, marker, close);
+    }
+  });
+}
+
+/**
+ * Turns a heading into an anchor-friendly slug.
+ *
+ * Letters, digits and the marks that hang under them (Thai and Devanagari
+ * vowels, for instance) are kept — a slug that loses them is no slug.
+ * @param {string} text
+ * @returns {string}
+ */
+function slugify(text) {
+  const slug = text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}\p{M}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || 'section';
+}
+
 // Initialize MarkdownIt
 const md = new MarkdownIt({
   html: true,
@@ -276,6 +452,87 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 // Register Plugins
 md.use(taskLists, { enabled: true, label: true, labelAfter: true });
 md.use(katexPlugin);
+md.use(footnote);
+// The full list of shortcodes, but rendered as the character itself — the
+// picture variant would need the network, and this app works offline.
+md.use(emoji, { defs: emojiDefs, shortcuts: emojiShortcuts });
+md.use(calloutPlugin);
+md.use(headingAnchorPlugin);
+
+/**
+ * Mermaid fences become a placeholder instead of a code block.
+ *
+ * The source is kept in the DOM (hidden) and the diagram is drawn later by
+ * the Mermaid renderer, because Mermaid needs a live document to measure and
+ * lay out its labels. Keeping the source also means a diagram still shows
+ * its code when the renderer cannot be loaded.
+ */
+const defaultFence =
+  md.renderer.rules.fence ||
+  function (tokens, idx, options, env, self) {
+    return self.renderToken(tokens, idx, options);
+  };
+
+/**
+ * Reads a `key="value"` pair out of a fence info string.
+ * @param {string} info
+ * @param {string} key
+ * @returns {string} the value, or an empty string
+ */
+function readFenceAttribute(info, key) {
+  const match = info.match(new RegExp(`${key}\\s*=\\s*["']([^"']*)["']`, 'i'));
+  return match ? match[1] : '';
+}
+
+md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const info = (token.info || '').trim();
+  const language = info.split(/\s+/)[0].toLowerCase();
+
+  if (language !== 'mermaid') {
+    return withCodeHeader(defaultFence(tokens, idx, options, env, self), token, language);
+  }
+
+  const source = token.content.replace(/\n$/, '');
+  const caption = readFenceAttribute(info, 'caption');
+
+  return (
+    `<figure class="mermaid-block" data-mermaid="true"${self.renderAttrs(token)}>` +
+    (caption ? `<figcaption class="mermaid-caption">${md.utils.escapeHtml(caption)}</figcaption>` : '') +
+    `<div class="mermaid-viewport"><div class="mermaid-canvas"></div></div>` +
+    `<pre class="mermaid-source" hidden><code class="language-mermaid">${md.utils.escapeHtml(source)}</code></pre>` +
+    `</figure>`
+  );
+};
+
+/**
+ * Wraps a code block in a panel with a header and a line-number gutter.
+ *
+ * The header carries the language and a copy button; the gutter is a column
+ * of numbers next to the code, which keeps the code itself untouched.
+ * @param {string} html the rendered code block
+ * @param {object} token the fence token
+ * @param {string} language
+ * @returns {string}
+ */
+function withCodeHeader(html, token, language) {
+  const lines = token.content.replace(/\n$/, '').split('\n').length;
+  const gutter =
+    lines > 1
+      ? `<div class="code-gutter" aria-hidden="true">${Array.from(
+          { length: lines },
+          (_, index) => index + 1
+        ).join('\n')}</div>`
+      : '';
+
+  return (
+    `<div class="code-block" data-language="${md.utils.escapeHtml(language || 'text')}">` +
+    `<div class="code-head"><span class="code-lang">${md.utils.escapeHtml(language || 'text')}</span>` +
+    `<button type="button" class="code-copy" data-code-copy aria-label="Copy the code">Copy</button></div>` +
+    `<div class="code-body">${gutter}${html}</div>` +
+    `</div>`
+  );
+}
 
 // DOMPurify Configuration allowing KaTeX MathML, SVGs, file:// and vscode:// URLs
 const DOMPURIFY_CONFIG = {
@@ -312,6 +569,8 @@ const DOMPURIFY_CONFIG = {
   ],
   ADD_ATTR: [
     'aria-hidden',
+    'aria-label',
+    'aria-pressed',
     'data-word-id',
     'data-math',
     'data-formula',
@@ -331,12 +590,25 @@ const DOMPURIFY_CONFIG = {
 
 /**
  * Converts markdown raw string to sanitized HTML
+ *
+ * The front matter is taken out first: it is metadata, not content, and it
+ * must not show up in the preview.
  * @param {string} markdownText
  * @param {object} [env={}] Optional render environment
  * @returns {string} Sanitized HTML string
  */
 export function renderMarkdown(markdownText, env = {}) {
   if (!markdownText) return '';
-  const rawHtml = md.render(markdownText, env);
+  const { body } = parseFrontmatter(markdownText);
+  const rawHtml = md.render(body, env);
   return DOMPurify.sanitize(rawHtml, DOMPURIFY_CONFIG);
+}
+
+/**
+ * Reads the front matter of a document.
+ * @param {string} markdownText
+ * @returns {Record<string, string>} the values of the block
+ */
+export function getDocumentMeta(markdownText) {
+  return parseFrontmatter(markdownText).data;
 }

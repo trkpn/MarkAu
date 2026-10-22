@@ -16,6 +16,7 @@
 
 import { el } from './dom.js';
 import { renderMarkdown } from '../markdown-parser.js';
+import { renderMermaidDiagrams, handleDiagramAction } from '../mermaid-renderer.js';
 import {
   detectLanguage,
   ensureTokens,
@@ -25,7 +26,6 @@ import {
   setAutoScrollEnabled,
   isSpeaking,
   isSpeechPaused,
-  togglePause,
   handlePreviewClick,
   onTTSStateChange
 } from '../tts-engine.js';
@@ -33,6 +33,7 @@ import { setSTTLocale } from '../stt-engine.js';
 import { getSettings, onSettingsChange } from '../settings-manager.js';
 import { onContentChange } from './editor.js';
 import { setMessage, clearMessage } from './status.js';
+import { toggleNarration } from './narration.js';
 
 let renderTimer = null;
 let idleHandle = null;
@@ -120,6 +121,10 @@ function renderNow(reason) {
     markTokensStale(reason);
     el.preview.innerHTML = html;
     lastHtml = html;
+
+    // Mermaid diagrams are drawn once the DOM exists — the renderer needs a
+    // live document to lay the diagram out.
+    renderMermaidDiagrams(el.preview);
 
     // The rewrite resets the scroll position — put the reader back where
     // they were, once the new content has been laid out.
@@ -456,12 +461,48 @@ function schedulePositionSave() {
  * ========================================================================== */
 
 /**
+ * Copies the code of a code block to the clipboard.
+ * @param {HTMLElement} button the copy button
+ */
+function copyCode(button) {
+  const block = button.closest('.code-block');
+  const code = block?.querySelector('code')?.textContent ?? '';
+  if (!code) return;
+
+  navigator.clipboard
+    ?.writeText(code)
+    .then(() => {
+      button.textContent = 'Copied';
+      button.classList.add('is-copied');
+      setTimeout(() => {
+        button.textContent = 'Copy';
+        button.classList.remove('is-copied');
+      }, 1500);
+    })
+    .catch(() => {
+      setMessage('Could not copy the code', { tone: 'warn', ttl: 2500 });
+    });
+}
+
+/**
  * Intercepts a link click so the app never navigates away from itself.
  * @param {HTMLAnchorElement} linkEl
  */
 function handleLinkClick(linkEl) {
-  const href = linkEl.getAttribute('href');
+  // A link inside a Mermaid diagram is an SVG anchor, which carries the
+  // target in `xlink:href` instead of `href`.
+  const href = linkEl.getAttribute('href') || linkEl.getAttribute('xlink:href');
   if (!href) return;
+
+  // A link to a place inside the document — a heading, a footnote.
+  if (href.startsWith('#')) {
+    const target = el.preview.querySelector(
+      `#${CSS.escape(decodeURIComponent(href.slice(1)))}`
+    );
+    if (!target) return;
+    target.scrollIntoView({ behavior: getSettings().smoothScrollActive ? 'smooth' : 'auto' });
+    return;
+  }
 
   if (/^file:\/\//i.test(href)) {
     // Browsers block file:// navigation — offer the path on the clipboard.
@@ -521,6 +562,12 @@ export function initPreview() {
 
   initSyncScroll();
 
+  // A diagram that finished drawing adds words to the document — the word
+  // count and the narration have to learn them.
+  el.preview.addEventListener('preview:diagram-rendered', () => {
+    scheduleTokenize();
+  });
+
   // Remember the reading position, and yield to the reader when they scroll
   // by hand while the narration is running.
   el.previewWrapper.addEventListener(
@@ -544,10 +591,32 @@ export function initPreview() {
   window.addEventListener('beforeunload', savePosition);
 
   el.preview.addEventListener('click', (event) => {
+    // The tools around a diagram handle their own clicks.
+    const tool = event.target.closest('[data-mermaid-action]');
+    if (tool) {
+      event.preventDefault();
+      handleDiagramAction(tool.dataset.mermaidAction, tool.closest('.mermaid-block'));
+      return;
+    }
+
+    // The copy button of a code block.
+    const copyButton = event.target.closest('[data-code-copy]');
+    if (copyButton) {
+      event.preventDefault();
+      copyCode(copyButton);
+      return;
+    }
+
     const linkEl = event.target.closest('a');
     if (linkEl) {
       event.preventDefault();
       handleLinkClick(linkEl);
+      return;
+    }
+
+    // Inside a diagram the click belongs to the diagram — a node can carry
+    // its own link, and nothing here is a reading gesture.
+    if (event.target.closest('.mermaid-block')) {
       return;
     }
 
@@ -567,11 +636,12 @@ export function initPreview() {
       return;
     }
 
-    // Empty space outside the text: pause (or resume) the narration.
-    const state = togglePause();
+    // Empty space outside the text does exactly what the Space key does:
+    // the reading starts, pauses and resumes again.
+    const state = toggleNarration();
     if (state === 'paused') {
-      setMessage('Paused — click a word to continue', { tone: 'accent', ttl: 2500 });
-    } else if (state === 'playing') {
+      setMessage('Paused — press Space to continue', { tone: 'accent', ttl: 2500 });
+    } else {
       setMessage('Reading…', { tone: 'accent', ttl: 1500 });
     }
   });

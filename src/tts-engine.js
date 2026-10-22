@@ -294,6 +294,23 @@ function tokenizeDOMForTTS(rootContainer, locale = 'en-US') {
     if (parent.closest('.katex') || parent.closest('[data-math="true"]')) {
       return true;
     }
+    // The source of a diagram is code, never prose.
+    if (parent.closest('.mermaid-source')) {
+      return true;
+    }
+    // The chrome around a code block is not part of the code.
+    if (parent.closest('.code-head') || parent.closest('.code-gutter')) {
+      return true;
+    }
+    // The permalink of a heading is a sign, not a word.
+    if (parent.closest('.heading-anchor')) {
+      return true;
+    }
+    // A diagram is a picture, not prose — its labels are only read aloud when
+    // the reader asked for it.
+    if (!getSettings().readDiagramLabels && parent.closest('.mermaid-block')) {
+      return true;
+    }
     return false;
   };
 
@@ -425,8 +442,8 @@ export function ensureTokens() {
  * Marks the token table as outdated.
  *
  * MUST be called *before* the preview DOM is replaced. If narration is
- * running it is stopped here, because the running utterance describes the old
- * document and would otherwise keep highlighting words in the new one.
+ * running it is stopped here, because the running utterance describes the
+ * old document and would otherwise keep highlighting words in the new one.
  *
  * @param {string} [reason] machine-readable reason surfaced to the UI
  */
@@ -435,6 +452,17 @@ export function markTokensStale(reason = 'content-changed') {
   if (isPlaying || isPaused) {
     stop(reason);
   }
+}
+
+/**
+ * Marks the token table as outdated *without* touching the playback.
+ *
+ * Used when the document itself did not change but the preview did — a
+ * diagram that finished drawing, for example. The running utterance still
+ * describes the old table, so the caller must not use this while reading.
+ */
+export function refreshTokens() {
+  tokensAreStale = true;
 }
 
 /* ==========================================================================
@@ -810,6 +838,14 @@ export function isSpeaking() {
 }
 
 /**
+ * @returns {boolean} whether the engine is warming up (the moment between
+ *   the press and the moment the speech actually begins)
+ */
+export function isNarrationStarting() {
+  return isStarting;
+}
+
+/**
  * @returns {boolean} whether narration is running but suspended
  */
 export function isSpeechPaused() {
@@ -977,22 +1013,6 @@ export function speakFromElement(element) {
   lastWordIndexAtRestart = index;
   speakFromWord(index);
   return true;
-}
-
-/**
- * Pauses the narration, or resumes it when it is already paused.
- * @returns {'playing'|'paused'|'idle'} the state after the toggle
- */
-export function togglePause() {
-  if (isPlaying && !isPaused) {
-    pause();
-    return 'paused';
-  }
-  if (isPaused) {
-    play();
-    return 'playing';
-  }
-  return 'idle';
 }
 
 /**

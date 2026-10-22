@@ -66,9 +66,9 @@ async function copyMarkdown() {
 
 async function clearDocument() {
   const confirmed = await confirmDialog({
-    title: 'Clear the document?',
+    title: 'Reset the document?',
     message: 'Removes all content from the editor.',
-    confirmLabel: 'Clear',
+    confirmLabel: 'Reset',
     danger: true
   });
   if (!confirmed) return;

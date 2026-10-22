@@ -74,6 +74,17 @@
           >
             <span class="btn-icon-slot" id="icon-paste" aria-hidden="true"></span>
           </button>
+
+          <!-- Reset: empties the document, next to Paste so it is always
+               one click away. -->
+          <button
+            id="btn-reset"
+            class="btn btn-icon"
+            title="Reset the document"
+            aria-label="Reset the document"
+          >
+            <span class="btn-icon-slot" id="icon-reset" aria-hidden="true"></span>
+          </button>
         </div>
 
         <!-- Zone 2: Audio Suite & Quick Tools (Standard Right) -->
@@ -90,18 +101,14 @@
             </div>
 
             <div class="playback-btn-group flex items-center gap-1">
-              <button id="btn-play" class="btn btn-primary" title="Play / pause reading">
+              <button
+                id="btn-play"
+                class="btn btn-primary"
+                title="Play reading"
+                aria-label="Play reading"
+              >
                 <span class="btn-icon-slot" id="icon-play" aria-hidden="true"></span>
                 <span class="play-label">Play</span>
-              </button>
-              <button
-                id="btn-pause"
-                class="btn btn-icon"
-                title="Pause"
-                aria-label="Pause reading"
-                disabled
-              >
-                <span class="btn-icon-slot" id="icon-pause" aria-hidden="true"></span>
               </button>
               <button
                 id="btn-stop"
@@ -158,6 +165,14 @@
               aria-label="Copy raw markdown"
             >
               <span class="btn-icon-slot" id="icon-copy" aria-hidden="true"></span>
+            </button>
+            <button
+              id="btn-print"
+              class="btn btn-icon"
+              title="Print or save as PDF"
+              aria-label="Print the document"
+            >
+              <span class="btn-icon-slot" id="icon-print" aria-hidden="true"></span>
             </button>
             <button
               id="btn-sync-scroll"
@@ -278,10 +293,10 @@
               <button
                 class="toolbar-btn"
                 data-action="clear"
-                title="Clear"
-                aria-label="Clear document"
+                title="Reset the document"
+                aria-label="Reset the document"
               >
-                <span class="btn-icon-slot" id="icon-trash" aria-hidden="true"></span>
+                <span class="btn-icon-slot" id="icon-reset-editor" aria-hidden="true"></span>
               </button>
             </div>
           </div>
@@ -522,6 +537,18 @@
                     </div>
                   </label>
                 </div>
+                <div class="setting-checkbox-item">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="check-diagram-labels" />
+                    <div class="checkbox-text">
+                      <strong>Read diagram labels aloud</strong>
+                      <span
+                        >The labels of a Mermaid diagram are read as part of the text. Off: only the
+                        prose is read.</span
+                      >
+                    </div>
+                  </label>
+                </div>
               </div>
 
               <!-- Files Group -->
@@ -579,7 +606,7 @@
                 <div class="shortcut-list">
                   <div class="shortcut-row">
                     <kbd>Space</kbd>
-                    <span>Play / pause</span>
+                    <span>Play / pause — everywhere but the editor</span>
                   </div>
                   <div class="shortcut-row">
                     <kbd>Esc</kbd>

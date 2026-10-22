@@ -5,11 +5,47 @@ import path from 'node:path';
 
 /**
  * Custom Vite Plugin to automatically inject all compiled assets (JS, CSS, fonts, HTML)
- * into dist/sw.js so that the Service Worker precaches 100% of the application offline.
+ * into dist/sw.js so that the Service Worker serves the whole application offline.
+ *
+ * Only the files the browser needs for the *first* load are precached. The
+ * chunks that are pulled in on demand — the full Highlight.js language set,
+ * Mermaid and its diagram parsers — are fetched when they are needed and
+ * cached by the service worker at runtime, so they cost nothing until a
+ * visitor actually uses them.
  */
 function swPrecachePlugin() {
+  /** The JS files that are statically reachable from the entry chunk. */
+  const state = { firstLoad: null };
+
   return {
     name: 'sw-precache-plugin',
+
+    /**
+     * Walks the chunk graph from the entry and keeps what the first load
+     * needs. Everything behind a dynamic import stays out of the precache.
+     */
+    generateBundle(_options, bundle) {
+      const chunks = Object.values(bundle).filter((item) => item.type === 'chunk');
+      const entry = chunks.find((chunk) => chunk.isEntry);
+      if (!entry) return;
+
+      const reachable = new Set();
+      const queue = [entry];
+
+      while (queue.length > 0) {
+        const chunk = queue.pop();
+        if (!chunk || reachable.has(chunk.fileName)) continue;
+        reachable.add(chunk.fileName);
+
+        for (const imported of chunk.imports) {
+          const next = chunks.find((candidate) => candidate.fileName === imported);
+          if (next) queue.push(next);
+        }
+      }
+
+      state.firstLoad = reachable;
+    },
+
     closeBundle() {
       const distDir = path.resolve(__dirname, 'dist');
       if (!fs.existsSync(distDir)) return;
@@ -22,10 +58,14 @@ function swPrecachePlugin() {
             getAllFiles(fullPath, fileList);
           } else {
             const rel = '/' + path.relative(distDir, fullPath).replace(/\\/g, '/');
-            // The optional language set is fetched on demand — precaching it
-            // would download ~800 kB that most visitors never need.
-            const isLazyChunk = /highlight-all/.test(rel);
-            if (!rel.endsWith('sw.js') && !isLazyChunk) {
+            if (rel.endsWith('sw.js')) continue;
+
+            // A script that is not part of the first load is fetched on
+            // demand — precaching it would download megabytes that most
+            // visitors never need.
+            const isLazyScript =
+              rel.endsWith('.js') && state.firstLoad && !state.firstLoad.has(rel.slice(1));
+            if (!isLazyScript) {
               fileList.push(rel);
             }
           }
@@ -73,9 +113,24 @@ export default defineConfig({
           if (facade.includes('highlight.js')) {
             return 'assets/highlight-all-[hash].js';
           }
+          // The Mermaid loader and the individual diagram parsers are fetched
+          // on demand; a recognisable name makes them easy to spot.
+          const moduleIds = chunkInfo.moduleIds || [];
+          const isMermaid =
+            facade.includes('node_modules/mermaid') ||
+            moduleIds.some((id) => id.includes('node_modules/mermaid'));
+          if (isMermaid) {
+            return 'assets/mermaid/[name]-[hash].js';
+          }
           return 'assets/[name]-[hash].js';
         },
         manualChunks(id) {
+          // Mermaid ships its own KaTeX. It must not join the app's chunk:
+          // the app loads that one with the first paint, while Mermaid is
+          // only needed once a document contains a diagram.
+          if (id.includes('node_modules/mermaid') && id.includes('katex')) {
+            return 'vendor-mermaid-katex';
+          }
           if (id.includes('katex')) {
             return 'vendor-katex';
           }

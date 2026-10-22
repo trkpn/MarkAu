@@ -47,7 +47,6 @@ export const el = {
 
   // Header — audio
   btnPlay: document.getElementById('btn-play'),
-  btnPause: document.getElementById('btn-pause'),
   btnStop: document.getElementById('btn-stop'),
   voiceSelect: document.getElementById('voice-select'),
   rateSlider: document.getElementById('rate-slider'),
@@ -57,7 +56,9 @@ export const el = {
   // Header — quick tools
   btnSample: document.getElementById('btn-sample'),
   btnCopy: document.getElementById('btn-copy'),
+  btnPrint: document.getElementById('btn-print'),
   btnPaste: document.getElementById('btn-paste'),
+  btnReset: document.getElementById('btn-reset'),
   btnSyncScroll: document.getElementById('btn-sync-scroll'),
   btnSplitAxis: document.getElementById('btn-split-axis'),
   btnTheme: document.getElementById('btn-theme'),
@@ -77,6 +78,7 @@ export const el = {
   checkVsCodeLinks: document.getElementById('check-vscode-links'),
   checkRememberPosition: document.getElementById('check-remember-position'),
   checkFollow: document.getElementById('check-follow'),
+  checkDiagramLabels: document.getElementById('check-diagram-labels'),
   selectSyncMode: document.getElementById('select-sync-mode'),
   selectSpeechChunk: document.getElementById('select-speech-chunk'),
   selectSaveFormat: document.getElementById('select-save-format'),
@@ -101,7 +103,6 @@ export const el = {
 
 const ICON_MAPPINGS = {
   'icon-play': icons.play,
-  'icon-pause': icons.pause,
   'icon-stop': icons.stop,
   'icon-mic': icons.mic,
   'icon-sync': icons.syncScroll,
@@ -118,8 +119,10 @@ const ICON_MAPPINGS = {
   'icon-task': icons.task,
   'icon-sample': icons.sparkles,
   'icon-copy': icons.copy,
+  'icon-print': icons.printer,
   'icon-paste': icons.paste,
-  'icon-trash': icons.trash,
+  'icon-reset': icons.reset,
+  'icon-reset-editor': icons.reset,
   'icon-open': icons.open,
   'icon-save': icons.save,
   'icon-outline': icons.outline,

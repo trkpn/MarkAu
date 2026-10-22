@@ -8,17 +8,20 @@
  * Rules:
  *   • Shortcuts never fire while the user is typing in a text field, unless
  *     the shortcut is explicitly a formatting command.
+ *   • The Space key belongs to the app: it plays and pauses the narration
+ *     everywhere — also when a button or a slider has the focus. Only a
+ *     check box keeps it, and a dialog keeps it as well.
  *   • Escape always does the least destructive thing first: it closes the
  *     preferences dialog if that is open, and only then stops narration.
  * ============================================================================
  */
 
 import { el } from './dom.js';
-import { play, pause, stop, isSpeaking, isSpeechPaused } from '../tts-engine.js';
+import { stop, isSpeaking } from '../tts-engine.js';
 import { applyFormat, flushDraft } from './editor.js';
 import { setView } from './layout.js';
 import { pasteFromClipboard } from './paste.js';
-import { flushRender } from './preview.js';
+import { toggleNarration } from './narration.js';
 import { setMessage } from './status.js';
 
 /**
@@ -28,17 +31,33 @@ import { setMessage } from './status.js';
 function isTextEntry(target) {
   if (!target || target === el.editor) return false;
   const tag = target.tagName;
-  return (
-    tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable === true
-  );
+  if (tag === 'TEXTAREA' || target.isContentEditable === true) return true;
+  // Only the inputs that take text — a slider or a button is not one, and
+  // the Space key has to keep working there.
+  if (tag === 'INPUT') {
+    const type = (target.getAttribute('type') || 'text').toLowerCase();
+    return !['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file'].includes(
+      type
+    );
+  }
+  return false;
 }
 
 /**
- * Starts narration from the current document.
+ * @param {EventTarget|null} target
+ * @returns {boolean} whether the target needs the Space key for itself
+ *
+ * Only a check box or a radio button does: for them, Space *is* the way to
+ * change the setting. Everything else — buttons, links, sliders, drop-downs —
+ * gives the Space key back to the app, so that the key means the same thing
+ * everywhere. Buttons and links still react to Enter.
  */
-function startReading() {
-  flushRender();
-  play();
+function ownsSpace(target) {
+  if (!target || !target.tagName) return false;
+  if (target.tagName.toLowerCase() !== 'input') return false;
+
+  const type = (target.getAttribute('type') || 'text').toLowerCase();
+  return type === 'checkbox' || type === 'radio';
 }
 
 /**
@@ -125,11 +144,16 @@ function onKeyDown(event) {
   if (inEditor || inField || mod || event.altKey || isModalOpen()) return;
 
   if (event.code === 'Space') {
+    // A check box keeps the key: for it, Space is the way to change the
+    // setting.
+    if (ownsSpace(event.target)) return;
+
     event.preventDefault();
-    if (isSpeaking() && !isSpeechPaused()) {
-      pause();
+    const state = toggleNarration();
+    if (state === 'paused') {
+      setMessage('Paused — press Space to continue', { tone: 'accent', ttl: 2500 });
     } else {
-      startReading();
+      setMessage('Reading…', { tone: 'accent', ttl: 1500 });
     }
     return;
   }

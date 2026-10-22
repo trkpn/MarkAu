@@ -9,8 +9,9 @@
  */
 
 import { el } from './dom.js';
-import { pause, play, stop, isSpeechPaused, onTTSStateChange } from '../tts-engine.js';
+import { stop, isSpeechPaused, onTTSStateChange } from '../tts-engine.js';
 import { icons } from '../icons.js';
+import { toggleNarration } from './narration.js';
 
 let dismissed = false;
 
@@ -67,11 +68,7 @@ export function initMiniPlayer() {
   }
 
   el.mpToggle?.addEventListener('click', () => {
-    if (isSpeechPaused()) {
-      play();
-    } else {
-      pause();
-    }
+    toggleNarration();
   });
 
   el.mpStop?.addEventListener('click', () => {

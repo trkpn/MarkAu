@@ -10,8 +10,6 @@
 import { el } from './dom.js';
 import { icons } from '../icons.js';
 import {
-  play,
-  pause,
   stop,
   setRate,
   setVoice,
@@ -33,24 +31,28 @@ import {
   setDictationState,
   setNetworkState
 } from './status.js';
-import { flushRender } from './preview.js';
+import { printDocument } from './print.js';
+import { toggleNarration } from './narration.js';
+import { groupVoices } from './voices.js';
 
 /* ==========================================================================
  * Playback transport
  * ========================================================================== */
 
 /**
- * Starts (or resumes) narration. The preview is flushed first so the
- * narrator never reads a document the editor has already replaced.
+ * The transport is a single toggle: the same button that starts the reading
+ * pauses it, and the Space key does the same thing. Two separate buttons
+ * only teach the reader which one to press.
  */
-function startNarration() {
-  flushRender();
-  play();
-}
-
 function initTransport() {
-  el.btnPlay.addEventListener('click', startNarration);
-  el.btnPause.addEventListener('click', () => pause());
+  el.btnPlay.addEventListener('click', () => {
+    const state = toggleNarration();
+    if (state === 'paused') {
+      setMessage('Paused — press Space to continue', { tone: 'accent', ttl: 2500 });
+    } else if (state === 'playing') {
+      setMessage('Reading…', { tone: 'accent', ttl: 1500 });
+    }
+  });
   el.btnStop.addEventListener('click', () => stop('user'));
 
   el.rateSlider.addEventListener('input', (event) => {
@@ -65,22 +67,38 @@ function initTransport() {
     // "Starting" covers the window between the press and the moment the
     // speech engine actually begins — tokenizing a large document takes a
     // moment and the button must not look unresponsive.
-    el.btnPlay.disabled = starting || (isPlaying && !isPaused);
-    el.btnPause.disabled = !isPlaying || isPaused;
+    el.btnPlay.disabled = starting;
     el.btnStop.disabled = !isPlaying && !isPaused;
 
     el.btnPlay.classList.toggle('is-busy', Boolean(starting));
     el.btnPlay.setAttribute('aria-busy', starting ? 'true' : 'false');
 
-    // Swap the play glyph for a spinner while the engine warms up.
+    // The button shows what it is going to do: pause while the reading
+    // runs, play when it is idle or paused.
+    const speaking = isPlaying && !isPaused;
     const playSlot = el.btnPlay.querySelector('.btn-icon-slot');
     if (playSlot) {
-      const wanted = starting ? icons.spinner : icons.play;
-      if (playSlot.dataset.icon !== (starting ? 'spinner' : 'play')) {
-        playSlot.dataset.icon = starting ? 'spinner' : 'play';
+      const wanted = starting ? icons.spinner : speaking ? icons.pause : icons.play;
+      const name = starting ? 'spinner' : speaking ? 'pause' : 'play';
+      if (playSlot.dataset.icon !== name) {
+        playSlot.dataset.icon = name;
         playSlot.innerHTML = wanted;
       }
     }
+
+    const playLabel = el.btnPlay.querySelector('.play-label');
+    if (playLabel) {
+      playLabel.textContent = starting ? '…' : speaking ? 'Pause' : isPaused ? 'Resume' : 'Play';
+    }
+
+    el.btnPlay.title = starting
+      ? 'Starting the reading'
+      : speaking
+        ? 'Pause reading'
+        : isPaused
+          ? 'Resume reading'
+          : 'Play reading';
+    el.btnPlay.setAttribute('aria-label', el.btnPlay.title);
 
     if (starting) {
       setNarrationState('starting');
@@ -127,12 +145,7 @@ async function initVoiceSelector() {
     return;
   }
 
-  const groups = { thai: [], english: [], other: [] };
-  voices.forEach((voice, index) => {
-    const lang = voice.lang.toLowerCase();
-    const bucket = lang.startsWith('th') ? 'thai' : lang.startsWith('en') ? 'english' : 'other';
-    groups[bucket].push({ voice, index });
-  });
+  const groups = groupVoices(voices);
 
   const appendGroup = (label, list) => {
     if (list.length === 0) return;
@@ -148,12 +161,14 @@ async function initVoiceSelector() {
   };
 
   appendGroup('🇹🇭 Thai Voices', groups.thai);
+  appendGroup('🌐 Multilingual Voices', groups.multilingual);
   appendGroup('🇺🇸 English Voices', groups.english);
-  appendGroup('🌐 Other Languages', groups.other);
+  appendGroup('🗣️ Other Languages', groups.other);
 
   let defaultIndex = 0;
   if (groups.thai.length > 0) defaultIndex = groups.thai[0].index;
   else if (groups.english.length > 0) defaultIndex = groups.english[0].index;
+  else if (groups.multilingual.length > 0) defaultIndex = groups.multilingual[0].index;
 
   const savedVoiceName = getSettings().voiceName;
   if (savedVoiceName) {
@@ -245,6 +260,20 @@ function initTheme() {
 }
 
 /* ==========================================================================
+ * Printing
+ * ========================================================================== */
+
+/**
+ * Prints the document — the browser's dialog can also save it as a PDF.
+ */
+function initPrint() {
+  el.btnPrint?.addEventListener('click', () => {
+    printDocument();
+    setMessage('Printing the document…', { tone: 'muted', ttl: 1500 });
+  });
+}
+
+/* ==========================================================================
  * Synchronized scrolling
  * ========================================================================== */
 
@@ -315,6 +344,7 @@ export async function initControls() {
   initNetworkStatus();
   initOfflineSupport();
   initPlaybackWatchdog();
+  initPrint();
 
   await initVoiceSelector();
 }
