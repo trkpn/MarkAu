@@ -5,7 +5,7 @@
  * a reminder of the keyboard shortcuts, without turning into a feature
  * pitch. Replace it with your own writing.
  */
-export const defaultMarkdown = `# MarkAudio
+export const defaultMarkdown = `# MarkAu
 
 A Markdown editor with a voice that reads along.
 

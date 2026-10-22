@@ -2,7 +2,7 @@
  * ============================================================================
  * MARKUDIO — APPLICATION BOOTSTRAP
  * ============================================================================
- * MarkAudio is a Markdown live preview with a synchronized audio reader.
+ * MarkAu is a Markdown live preview with a synchronized audio reader.
  * Everything runs locally in the browser: no server, no network fonts.
  *
  * Module map:

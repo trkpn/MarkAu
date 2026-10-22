@@ -14,7 +14,7 @@ const {
   SPLIT_RATIO_MAX
 } = await import('../src/settings-manager.js');
 
-const KEY = 'markaudio_settings_v1';
+const KEY = 'markau_settings_v1';
 
 describe('sanitizeSettings', () => {
   it('keeps valid values', () => {
@@ -123,6 +123,24 @@ describe('migration', () => {
     const settings = loadSettings();
     expect(settings.theme).toBe(DEFAULT_SETTINGS.theme);
     expect(settings.fontUi).toBe(DEFAULT_SETTINGS.fontUi);
+  });
+
+  it('moves the settings over from the key of the old name', () => {
+    const LEGACY_KEY = 'markaudio_settings_v1';
+    localStorage.setItem(LEGACY_KEY, JSON.stringify({ version: 3, theme: 'light' }));
+
+    const settings = loadSettings();
+
+    expect(settings.theme).toBe('light');
+    expect(localStorage.getItem(KEY)).not.toBeNull();
+    expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
+  });
+
+  it('keeps the settings of the new name when both exist', () => {
+    localStorage.setItem(KEY, JSON.stringify({ version: 3, theme: 'dark' }));
+    localStorage.setItem('markaudio_settings_v1', JSON.stringify({ version: 3, theme: 'light' }));
+
+    expect(loadSettings().theme).toBe('dark');
   });
 });
 

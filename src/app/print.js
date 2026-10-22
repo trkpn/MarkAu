@@ -17,7 +17,7 @@ import { getDocumentMeta } from '../markdown-parser.js';
 import { flushRender } from './preview.js';
 
 /** The name of the app — the fallback title of a printed document. */
-const APP_TITLE = 'MarkAudio';
+const APP_TITLE = 'MarkAu';
 
 /**
  * The title of the document: the front matter, the first heading, or the

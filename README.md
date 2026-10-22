@@ -1,4 +1,4 @@
-# MarkAudio
+# MarkAu
 
 A fast, lightweight and offline-capable Markdown editor with real-time text-to-speech (TTS) audio narration and voice dictation. Runs 100% in your browser with zero server dependencies.
 

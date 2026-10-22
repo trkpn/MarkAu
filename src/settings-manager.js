@@ -11,7 +11,14 @@
  * ============================================================================
  */
 
-const SETTINGS_STORAGE_KEY = 'markaudio_settings_v1';
+const SETTINGS_STORAGE_KEY = 'markau_settings_v1';
+
+/**
+ * The key the settings had before the app was renamed. The preferences are
+ * moved over, so the rename does not cost the reader their settings.
+ */
+const LEGACY_SETTINGS_KEY = 'markaudio_settings_v1';
+
 const SCHEMA_VERSION = 3;
 
 /** Legacy standalone keys that are folded into the settings payload on load. */
@@ -297,10 +304,29 @@ function migrate(parsed) {
  * ========================================================================== */
 
 /**
+ * Moves the settings over from the key they had before the rename.
+ */
+function adoptLegacySettings() {
+  try {
+    if (localStorage.getItem(SETTINGS_STORAGE_KEY)) return;
+
+    const legacy = localStorage.getItem(LEGACY_SETTINGS_KEY);
+    if (!legacy) return;
+
+    localStorage.setItem(SETTINGS_STORAGE_KEY, legacy);
+    localStorage.removeItem(LEGACY_SETTINGS_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/**
  * Loads settings from localStorage, migrates and sanitizes them.
  */
 export function loadSettings() {
   try {
+    adoptLegacySettings();
+
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);

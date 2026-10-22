@@ -81,7 +81,7 @@ function swPrecachePlugin() {
         let swCode = fs.readFileSync(swDistPath, 'utf8');
         swCode = swCode.replace(
           /const CACHE_NAME = [^;\n]+;/,
-          `const CACHE_NAME = 'markaudio-${buildTimestamp}';`
+          `const CACHE_NAME = 'markau-${buildTimestamp}';`
         );
         swCode = swCode.replace(
           /const STATIC_ASSETS = \[[\s\S]*?\];/,
@@ -89,7 +89,7 @@ function swPrecachePlugin() {
         );
         fs.writeFileSync(swDistPath, swCode, 'utf8');
         console.log(
-          `[SW Plugin] Timestamp: markaudio-${buildTimestamp} with ${assetUrls.length} precache assets injected into dist/sw.js`
+          `[SW Plugin] Timestamp: markau-${buildTimestamp} with ${assetUrls.length} precache assets injected into dist/sw.js`
         );
       }
     }

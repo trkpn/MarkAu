@@ -1,5 +1,5 @@
 /**
- * MarkAudio Service Worker
+ * MarkAu Service Worker
  * Complete offline PWA capability
  *
  * Strategy
@@ -19,7 +19,7 @@
  *      can never block the page.
  */
 
-const CACHE_NAME = 'markaudio-' + (self.__SW_TIMESTAMP__ || Date.now());
+const CACHE_NAME = 'markau-' + (self.__SW_TIMESTAMP__ || Date.now());
 
 const STATIC_ASSETS = [
   '/',
@@ -102,7 +102,11 @@ self.addEventListener('activate', (event) => {
       .then((keys) =>
         Promise.all(
           keys.map((key) => {
-            if (key !== CACHE_NAME && key.startsWith('markaudio-')) {
+            // The cache of the old name is purged as well, so the rename
+            // does not leave a copy of the app behind.
+            const isOutdated =
+              key.startsWith('markau-') || key.startsWith('markaudio-');
+            if (key !== CACHE_NAME && isOutdated) {
               console.log('[SW] Purging outdated cache:', key);
               return caches.delete(key);
             }

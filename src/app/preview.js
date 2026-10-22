@@ -401,9 +401,33 @@ function initSyncScroll() {
  * where the reader left off.
  * ========================================================================== */
 
-const POSITION_KEY = 'markaudio_position';
+const POSITION_KEY = 'markau_position';
+
+/**
+ * The key the reading position had before the app was renamed. It is moved
+ * over, so the reader picks up where they left off.
+ */
+const LEGACY_POSITION_KEY = 'markaudio_position';
+
 let positionTimer = null;
 let positionRestored = false;
+
+/**
+ * Moves the reading position over from the key it had before the rename.
+ */
+function adoptLegacyPosition() {
+  try {
+    if (localStorage.getItem(POSITION_KEY)) return;
+
+    const legacy = localStorage.getItem(LEGACY_POSITION_KEY);
+    if (!legacy) return;
+
+    localStorage.setItem(POSITION_KEY, legacy);
+    localStorage.removeItem(LEGACY_POSITION_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 /**
  * Stores the current reading position.
@@ -540,6 +564,7 @@ export function initPreview() {
   setScrollContainer(el.previewWrapper);
   setPreviewContainer(el.preview);
   applyFollowSetting();
+  adoptLegacyPosition();
 
   onContentChange(({ reason }) => scheduleRender(reason));
 
