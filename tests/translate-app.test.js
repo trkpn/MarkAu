@@ -47,6 +47,11 @@ const MARKUP = `
   </div>
   <button id="btn-translate"></button>
   <button id="btn-close-translate"></button>
+  <div id="translate-progress" hidden>
+    <div id="translate-progress-bar"></div>
+    <span id="translate-progress-label"></span>
+    <button id="btn-translate-stop">Stop</button>
+  </div>
   <textarea id="editor"></textarea>
 `;
 
@@ -61,6 +66,7 @@ const {
   readBackup,
   saveBackup,
   clearBackup,
+  runTranslation,
   runTranslationWithRetry
 } = await import('../src/app/translate.js');
 const { el } = await import('../src/app/dom.js');
@@ -188,6 +194,157 @@ describe('the button in the header', () => {
 
     el.btnTranslate.click();
     expect(el.modalTranslate.hasAttribute('hidden')).toBe(false);
+  });
+});
+
+describe('a translation of many parts', () => {
+  /**
+   * A translator that answers with every unit it was given, marked — and
+   * that lets a test watch the document change between the requests.
+   * @param {() => void} onRequest called before each answer
+   * @param {string[]} seen collects the document as it was at each request
+   * @returns {typeof fetch}
+   */
+  function watchfulTranslator(onRequest, seen) {
+    return async (input, init) => {
+      const url = String(typeof input === 'string' ? input : input?.url);
+
+      if (url.includes('/api/translate')) {
+        // The document as it stands before this part is translated.
+        seen.push(el.editor.value);
+        onRequest();
+
+        const body = JSON.parse(init.body);
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            detected: 'en',
+            results: body.units.map((unit) => `TH<${unit}>`)
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ sentences: [{ trans: 'TH<direct>' }], src: 'en' }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    };
+  }
+
+  it('shows the parts that are done before the last one is translated', async () => {
+    initTranslate();
+    storage.clear();
+
+    // A document long enough to need more than one request.
+    const paragraph = 'A paragraph of words that goes on for a while. ';
+    el.editor.value = [
+      '# The first heading',
+      '',
+      paragraph.repeat(30),
+      '',
+      '## The second heading',
+      '',
+      paragraph.repeat(30),
+      '',
+      '### The third heading',
+      '',
+      paragraph.repeat(30)
+    ].join('\n');
+    el.editor.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const seen = [];
+    globalThis.fetch = watchfulTranslator(() => {}, seen);
+
+    el.editor.setSelectionRange(0, 0);
+    await runTranslation();
+
+    // The document is translated in parts, not in one go.
+    expect(seen.length).toBeGreaterThan(1);
+
+    // The document as the user saw it, part by part: nothing is
+    // translated at the beginning, and every part that comes back adds to
+    // what is there — so the translation is seen to grow instead of
+    // appearing all at once.
+    const counts = seen.map((text) => (text.match(/TH</g) || []).length);
+    const final = (el.editor.value.match(/TH</g) || []).length;
+
+    expect(counts[0]).toBe(0);
+
+    for (let index = 1; index < counts.length; index += 1) {
+      expect(counts[index]).toBeGreaterThan(counts[index - 1]);
+    }
+
+    // And the last part was still missing when the last request went out.
+    expect(counts[counts.length - 1]).toBeLessThan(final);
+  });
+
+  it('says how far it has come', async () => {
+    initTranslate();
+    storage.clear();
+
+    const paragraph = 'A paragraph of words that goes on for a while. ';
+    el.editor.value = [
+      '# The first heading',
+      '',
+      paragraph.repeat(30),
+      '',
+      '## The second heading',
+      '',
+      paragraph.repeat(30)
+    ].join('\n');
+    el.editor.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const labels = [];
+    globalThis.fetch = watchfulTranslator(() => {
+      labels.push(el.translateProgressLabel.textContent);
+    }, []);
+
+    el.editor.setSelectionRange(0, 0);
+    await runTranslation();
+
+    // The bar says what it is doing and how far it has come.
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels[0]).toMatch(/Translating — \d+ of \d+ parts/);
+
+    // And it is put away when the work is done.
+    expect(el.translateProgress.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('stops when the user asks it to', async () => {
+    initTranslate();
+    storage.clear();
+
+    const paragraph = 'A paragraph of words that goes on for a while. ';
+    el.editor.value = [
+      '# The first heading',
+      '',
+      paragraph.repeat(30),
+      '',
+      '## The second heading',
+      '',
+      paragraph.repeat(30),
+      '',
+      '### The third heading',
+      '',
+      paragraph.repeat(30)
+    ].join('\n');
+    el.editor.dispatchEvent(new Event('input', { bubbles: true }));
+
+    let requests = 0;
+    globalThis.fetch = watchfulTranslator(() => {
+      requests += 1;
+      // The user stops it after the first part.
+      if (requests === 1) el.btnTranslateStop.click();
+    }, []);
+
+    el.editor.setSelectionRange(0, 0);
+    const finished = await runTranslation();
+
+    expect(finished).toBe(false);
+    // What was translated before the stop is still there.
+    expect(el.editor.value).toContain('TH<');
+    expect(el.translateProgress.hasAttribute('hidden')).toBe(true);
   });
 });
 

@@ -1716,6 +1716,50 @@
     max-width: 480px;
   }
 
+  /* -------------------------------------------------- translation --
+     A translation of a long document takes a while, and the bar says how
+     far it has come — so that the user can tell the work from a hang. */
+  .translate-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.35rem 0.9rem;
+    border-bottom: 1px solid var(--ma-border);
+    background: var(--ma-bg-2);
+    font-size: 0.74rem;
+    color: var(--ma-fg-2);
+  }
+
+  .translate-progress[hidden] {
+    display: none;
+  }
+
+  .translate-progress-track {
+    flex: 1;
+    height: 4px;
+    min-width: 60px;
+    border-radius: 2px;
+    background: var(--ma-border);
+    overflow: hidden;
+  }
+
+  .translate-progress-bar {
+    width: 0;
+    height: 100%;
+    border-radius: 2px;
+    background: var(--ma-accent);
+    transition: width 0.2s ease;
+  }
+
+  .translate-progress-label {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .translate-progress-stop {
+    flex-shrink: 0;
+  }
+
   .url-import-form {
     display: flex;
     flex-direction: column;

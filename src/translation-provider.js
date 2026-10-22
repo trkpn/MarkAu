@@ -318,7 +318,13 @@ export function splitUnits(text, count) {
 }
 
 /**
- * Groups the units into requests that are not too large.
+ * A request: the pieces that travel together, and the unit each belongs to.
+ *
+ * @typedef {{ unit: number, text: string }} Piece
+ */
+
+/**
+ * Groups the units into the requests that will be made.
  *
  * A unit that is too long is cut into pieces, and the pieces travel in the
  * request on their own. Every piece remembers the unit it came from, so
@@ -326,11 +332,11 @@ export function splitUnits(text, count) {
  * to — a unit that was cut in two must not turn into two units.
  *
  * @param {string[]} units
- * @returns {Array<Array<{ unit: number, text: string }>>}
+ * @returns {Array<{ pieces: Piece[], texts: string[] }>}
  */
-export function groupUnits(units) {
-  const groups = [];
-  let current = [];
+export function planRequests(units) {
+  const requests = [];
+  let current = { pieces: [], texts: [] };
   let size = 0;
 
   for (let unit = 0; unit < units.length; unit += 1) {
@@ -343,20 +349,34 @@ export function groupUnits(units) {
     for (const piece of pieces) {
       const added = piece.length + SEPARATOR.length + 2;
 
-      if (current.length && (size + added > MAX_BATCH_CHARS || current.length >= MAX_BATCH_UNITS)) {
-        groups.push(current);
-        current = [];
+      if (
+        current.pieces.length &&
+        (size + added > MAX_BATCH_CHARS || current.pieces.length >= MAX_BATCH_UNITS)
+      ) {
+        requests.push(current);
+        current = { pieces: [], texts: [] };
         size = 0;
       }
 
-      current.push({ unit, text: piece });
+      current.pieces.push({ unit, text: piece });
+      current.texts.push(piece);
       size += added;
     }
   }
 
-  if (current.length) groups.push(current);
+  if (current.pieces.length) requests.push(current);
 
-  return groups;
+  return requests;
+}
+
+/**
+ * Groups the units into requests that are not too large.
+ *
+ * @param {string[]} units
+ * @returns {Array<Array<{ unit: number, text: string }>>}
+ */
+export function groupUnits(units) {
+  return planRequests(units).map((request) => request.pieces);
 }
 
 /**

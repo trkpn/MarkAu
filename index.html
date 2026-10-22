@@ -247,6 +247,23 @@
         </div>
       </header>
 
+      <!-- The progress of a translation: the document is translated piece
+           by piece, and the bar says how far it has come. -->
+      <div id="translate-progress" class="translate-progress" hidden>
+        <div class="translate-progress-track">
+          <div id="translate-progress-bar" class="translate-progress-bar"></div>
+        </div>
+        <span id="translate-progress-label" class="translate-progress-label"></span>
+        <button
+          id="btn-translate-stop"
+          class="btn btn-sm translate-progress-stop"
+          title="Stop the translation"
+          aria-label="Stop the translation"
+        >
+          Stop
+        </button>
+      </div>
+
       <!-- Main Workspace (Dual Pane Layout - Pure Content, 100% Focused) -->
       <main
         id="workspace"

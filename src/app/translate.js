@@ -18,7 +18,7 @@
  */
 
 import { el } from './dom.js';
-import { setMarkdown, insertText } from './editor.js';
+import { setMarkdown } from './editor.js';
 import { getSettings, saveSettings } from '../settings-manager.js';
 import { setMessage } from './status.js';
 import { confirmDialog } from './dialog.js';
@@ -35,7 +35,11 @@ import {
   tokensIntact,
   normalizeEol
 } from '../translation.js';
-import { translateUnits, TranslateError } from '../translation-provider.js';
+import {
+  translateUnits,
+  planRequests,
+  TranslateError
+} from '../translation-provider.js';
 
 /** The endpoint of the translator. It is on the same origin. */
 const TRANSLATE_ENDPOINT = '/api/translate';
@@ -223,56 +227,12 @@ async function requestThroughServer(units, target) {
  */
 
 /**
- * Translates a piece of Markdown.
+ * Whether the user asked for the translation to stop.
  *
- * @param {string} markdown
- * @param {string} target
- * @returns {Promise<{ markdown: string, detected: string, damaged: number }>}
+ * The work is not thrown away: what has been translated so far stays in
+ * the document, and the original is still there to go back to.
  */
-export async function translateMarkdown(markdown, target) {
-  const plan = buildPlan(markdown);
-
-  if (plan.units.length === 0) {
-    // There is nothing to translate — a document of code and formulas.
-    return { markdown, detected: '', damaged: 0 };
-  }
-
-  const { results, detected } = await requestTranslation(
-    plan.units.map((unit) => unit.text),
-    target
-  );
-
-  let damaged = 0;
-
-  const answers = plan.units.map((unit, index) => {
-    const translated = results[index];
-
-    if (typeof translated !== 'string' || !translated.trim()) {
-      damaged += 1;
-      return { text: unit.original, intact: false };
-    }
-
-    // The structure of the unit has to be intact: every token has to be
-    // there, and it has to be there once. If it is not, the original text
-    // is used — a document that is half-translated is better than a
-    // document whose code no longer compiles.
-    if (!tokensIntact(translated, unit.expected)) {
-      damaged += 1;
-      return { text: unit.original, intact: false };
-    }
-
-    return { text: unmaskText(translated, plan.registry), intact: true };
-  });
-
-  return {
-    // The line endings of the document are kept: a document that came
-    // from Windows keeps them, and one that came from anywhere else does
-    // not get them.
-    markdown: normalizeEol(rebuildDocument(plan, answers), plan.eol),
-    detected,
-    damaged
-  };
-}
+let stopRequested = false;
 
 /* ==========================================================================
  * The dialog
@@ -377,6 +337,36 @@ function setBusy(busy, label = 'Translate') {
 }
 
 /**
+ * Shows how far the translation has come.
+ *
+ * The bar is what tells the user that the work is going on — without it,
+ * a long document looks like a hang.
+ *
+ * @param {number} done how many parts are translated
+ * @param {number} total how many parts there are
+ */
+function showProgress(done, total) {
+  if (!el.translateProgress) return;
+
+  el.translateProgress.removeAttribute('hidden');
+
+  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+  if (el.translateProgressBar) {
+    el.translateProgressBar.style.width = `${percent}%`;
+  }
+  if (el.translateProgressLabel) {
+    el.translateProgressLabel.textContent = `Translating — ${done} of ${total} parts`;
+  }
+}
+
+/**
+ * Hides the bar.
+ */
+function hideProgress() {
+  el.translateProgress?.setAttribute('hidden', '');
+}
+
+/**
  * Puts the original document back.
  */
 async function restoreOriginal() {
@@ -403,6 +393,11 @@ async function restoreOriginal() {
 /**
  * Translates the document and puts the answer in its place.
  *
+ * The document is translated piece by piece, and every piece that comes
+ * back is put into the document right away. The user sees the translation
+ * grow instead of waiting for the whole document — and the bar says how
+ * far it has come, so that the work cannot be mistaken for a hang.
+ *
  * A refusal of the translator is thrown on, so that the caller can try
  * again — every other failure is shown to the user right away.
  *
@@ -418,37 +413,103 @@ export async function runTranslation() {
     return false;
   }
 
+  const plan = buildPlan(part.text);
+  if (plan.units.length === 0) {
+    setMessage('There is nothing to translate in this text', { tone: 'warn', ttl: 4000 });
+    showError('This text holds no words — only code and formulas.');
+    return false;
+  }
+
   setBusy(true);
+  closeDialog();
+  showProgress(0, plan.units.length);
   setMessage('Translating…', { tone: 'muted' });
 
+  // The original is kept before anything is written into the document — a
+  // translation that cannot be taken back is a translation nobody wants.
+  saveBackup(el.editor.value, target);
+  syncRestoreButton();
+
+  // The text around the part that is translated stays as it is.
+  const before = part.whole ? '' : el.editor.value.slice(0, part.start);
+  const after = part.whole ? '' : el.editor.value.slice(part.end);
+
+  // The answers of the units, piece by piece. A unit that was cut in two
+  // is put together once both of its pieces are in.
+  const answers = new Array(plan.units.length).fill(null);
+  const pieces = new Array(plan.units.length).fill(null).map(() => []);
+
+  const requests = planRequests(plan.units.map((unit) => unit.text));
+  let done = 0;
+  let detected = '';
+  let damaged = 0;
+  stopRequested = false;
+
   try {
-    const original = part.whole ? el.editor.value : part.text;
+    for (const request of requests) {
+      if (stopRequested) break;
 
-    const { markdown, detected, damaged } = await translateMarkdown(original, target);
+      const answer = await requestTranslation(request.texts, target);
+      if (!detected) detected = answer.detected;
 
-    if (markdown === original) {
+      // Every piece is put where it belongs.
+      request.pieces.forEach((piece, index) => {
+        const text = answer.results[index];
+        if (typeof text === 'string') pieces[piece.unit].push(text);
+      });
+
+      // A unit is whole once all of its pieces are in.
+      for (let unit = 0; unit < plan.units.length; unit += 1) {
+        if (answers[unit] !== null) continue;
+
+        const unitPieces = pieces[unit];
+        const expectedPieces = requests
+          .flatMap((entry) => entry.pieces)
+          .filter((piece) => piece.unit === unit).length;
+
+        if (unitPieces.length < expectedPieces) continue;
+
+        const joined = unitPieces.join(' ');
+        const original = plan.units[unit];
+
+        // The structure of the unit has to be intact: every token has to
+        // be there, and it has to be there once. If it is not, the
+        // original text is used — a document that is half-translated is
+        // better than a document whose code no longer compiles.
+        if (!tokensIntact(joined, original.expected)) {
+          damaged += 1;
+          answers[unit] = { text: original.original, intact: false };
+        } else {
+          answers[unit] = { text: unmaskText(joined, plan.registry), intact: true };
+        }
+
+        done += 1;
+      }
+
+      // The document is written with what has been translated so far.
+      // The line endings are kept: a document that came from Windows
+      // keeps them, and one that came from anywhere else does not get
+      // them.
+      const partial = normalizeEol(rebuildDocument(plan, answers), plan.eol);
+      setMarkdown(before + partial + after, 'edited');
+      showProgress(done, plan.units.length);
+    }
+
+    if (stopRequested) {
+      setMessage(`Stopped — ${done} of ${plan.units.length} parts were translated`, {
+        tone: 'warn',
+        ttl: 5000
+      });
+      return false;
+    }
+
+    if (done === 0) {
       setMessage('Nothing was translated', { tone: 'warn', ttl: 4000 });
       showError('The translator did not change anything.');
       return false;
     }
 
-    // The original is kept before it is replaced — a translation that
-    // cannot be taken back is a translation nobody wants.
-    saveBackup(el.editor.value, target);
-    syncRestoreButton();
-
-    if (part.whole) {
-      setMarkdown(markdown, 'replaced');
-    } else {
-      // The selection is put back where it was, the way a paste does it —
-      // so that the undo of the browser still works.
-      el.editor.focus();
-      el.editor.setSelectionRange(part.start, part.end);
-      insertText(markdown, { replaceDocument: false });
-    }
-
     saveSettings({ translateTarget: target });
-    closeDialog();
 
     const from = detected ? ` from ${languageEnglishName(detected)}` : '';
     const broken = damaged > 0 ? ` — ${damaged} part(s) kept as they were` : '';
@@ -479,6 +540,7 @@ export async function runTranslation() {
     return false;
   } finally {
     setBusy(false);
+    hideProgress();
   }
 }
 
@@ -526,6 +588,15 @@ export function initTranslate() {
   el.btnCloseTranslate?.addEventListener('click', closeDialog);
   el.btnTranslateCancel?.addEventListener('click', closeDialog);
   el.btnTranslateRestore?.addEventListener('click', restoreOriginal);
+
+  // The translation can be stopped: what has been translated so far stays
+  // in the document, and the rest is left as it was.
+  el.btnTranslateStop?.addEventListener('click', () => {
+    stopRequested = true;
+    if (el.translateProgressLabel) {
+      el.translateProgressLabel.textContent = 'Stopping…';
+    }
+  });
 
   el.modalTranslate?.addEventListener('click', (event) => {
     if (event.target === el.modalTranslate) closeDialog();

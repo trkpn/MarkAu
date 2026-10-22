@@ -113,6 +113,10 @@ export const el = {
   btnTranslateCancel: document.getElementById('btn-translate-cancel'),
   btnTranslateRestore: document.getElementById('btn-translate-restore'),
   btnCloseTranslate: document.getElementById('btn-close-translate'),
+  btnTranslateStop: document.getElementById('btn-translate-stop'),
+  translateProgress: document.getElementById('translate-progress'),
+  translateProgressBar: document.getElementById('translate-progress-bar'),
+  translateProgressLabel: document.getElementById('translate-progress-label'),
 
   splitAxisInputs: Array.from(document.querySelectorAll('input[name="split-axis"]')),
   splitRatioSlider: document.getElementById('split-ratio-slider'),
