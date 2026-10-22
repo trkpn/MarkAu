@@ -152,7 +152,7 @@ function scheduleTokenize() {
     idleHandle = null;
     const tokens = ensureTokens();
     if (el.activeTokenInfo) {
-      el.activeTokenInfo.textContent = `Tokens: ${tokens.length}`;
+      el.activeTokenInfo.textContent = `${tokens.length} words ready`;
     }
   };
 

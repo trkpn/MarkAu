@@ -14,7 +14,6 @@ export const el = {
   // Workspace
   workspace: document.getElementById('workspace'),
   splitter: document.getElementById('splitter'),
-  paneEditor: document.getElementById('pane-editor'),
   panePreview: document.getElementById('pane-preview'),
 
   // Master toolbar
@@ -58,6 +57,7 @@ export const el = {
   btnCopy: document.getElementById('btn-copy'),
   btnPrint: document.getElementById('btn-print'),
   btnPaste: document.getElementById('btn-paste'),
+  btnImportUrl: document.getElementById('btn-import-url'),
   btnReset: document.getElementById('btn-reset'),
   btnSyncScroll: document.getElementById('btn-sync-scroll'),
   btnSplitAxis: document.getElementById('btn-split-axis'),
@@ -87,6 +87,19 @@ export const el = {
   selectTheme: document.getElementById('select-theme'),
   btnResetSettings: document.getElementById('btn-reset-settings'),
   storageUsageText: document.getElementById('storage-usage-text'),
+  checkReaderFallback: document.getElementById('check-reader-fallback'),
+  inputReaderApiKey: document.getElementById('input-reader-api-key'),
+
+  // Import from URL modal
+  modalUrlImport: document.getElementById('modal-url-import'),
+  dropOverlay: document.getElementById('drop-overlay'),
+  dropOverlayText: document.getElementById('drop-overlay-text'),
+  urlImportForm: document.getElementById('url-import-form'),
+  urlImportInput: document.getElementById('url-import-input'),
+  urlImportError: document.getElementById('url-import-error'),
+  btnUrlImportSubmit: document.getElementById('btn-url-import-submit'),
+  btnUrlImportCancel: document.getElementById('btn-url-import-cancel'),
+  btnCloseUrlImport: document.getElementById('btn-close-url-import'),
   splitAxisInputs: Array.from(document.querySelectorAll('input[name="split-axis"]')),
   splitRatioSlider: document.getElementById('split-ratio-slider'),
   splitRatioBadge: document.getElementById('split-ratio-badge'),
@@ -121,8 +134,11 @@ const ICON_MAPPINGS = {
   'icon-copy': icons.copy,
   'icon-print': icons.printer,
   'icon-paste': icons.paste,
+  'icon-import-url': icons.link,
+  'icon-import-url-modal': icons.link,
+  'icon-close-url-import': icons.close,
+  'icon-drop-overlay': icons.drop,
   'icon-reset': icons.reset,
-  'icon-reset-editor': icons.reset,
   'icon-open': icons.open,
   'icon-save': icons.save,
   'icon-outline': icons.outline,

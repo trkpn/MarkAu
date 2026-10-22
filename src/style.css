@@ -1483,7 +1483,17 @@
   .footer-section {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0;
+  }
+
+  /* The parts of the footer are held apart by a dot. The dot is drawn by
+     the stylesheet rather than written into the page, so it goes away with
+     the part it belongs to — and no screen reader ever has to read it. */
+  .footer-section > * + *::before {
+    content: '·';
+    margin: 0 0.5rem;
+    color: var(--ma-fg-muted);
+    opacity: 0.45;
   }
 
   .status-pill {
@@ -1491,12 +1501,6 @@
     align-items: center;
     gap: 0.4rem;
     font-weight: 500;
-  }
-
-  .status-pill-separator {
-    color: var(--ma-fg-muted);
-    opacity: 0.45;
-    user-select: none;
   }
 
   .speech-status-chip {
@@ -1519,12 +1523,6 @@
 
   .speech-status-chip[data-tone='warn'] {
     color: var(--ma-rec-fg);
-  }
-
-  .footer-divider-dot {
-    color: var(--ma-fg-muted);
-    opacity: 0.35;
-    user-select: none;
   }
 
   .status-dot {
@@ -1709,6 +1707,108 @@
     font-size: 0.74rem;
     line-height: 1.45;
     color: var(--ma-fg-2);
+  }
+
+  /* ------------------------------------------------------ url import --
+     The import dialog is a single question with a single answer, so it is
+     narrower than the preferences dialog. */
+  .modal-card-compact {
+    max-width: 480px;
+  }
+
+  .url-import-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .url-import-label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--ma-fg-2);
+  }
+
+  .url-import-input,
+  .api-key-input {
+    width: 100%;
+    height: 38px;
+    padding: 0 0.75rem;
+    font-family: var(--ma-font-ui);
+    font-size: 0.85rem;
+    color: var(--ma-fg);
+    background: var(--ma-bg);
+    border: 1px solid var(--ma-border);
+    border-radius: 8px;
+    outline: none;
+  }
+
+  .url-import-input:focus,
+  .api-key-input:focus {
+    border-color: var(--ma-accent);
+  }
+
+  .url-import-input:disabled {
+    opacity: 0.6;
+  }
+
+  .url-import-error {
+    min-height: 1rem;
+    font-size: 0.74rem;
+    line-height: 1.45;
+    color: var(--ma-rec-fg);
+  }
+
+  .url-import-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
+
+  /* ------------------------------------------------------ drag & drop --
+     The panel that appears while something is held over the app. It says
+     what will happen, so nothing is dropped by surprise. */
+  .drop-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--ma-bg) 70%, transparent);
+    backdrop-filter: blur(3px);
+    pointer-events: none;
+  }
+
+  .drop-overlay[hidden] {
+    display: none;
+  }
+
+  .drop-overlay-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 2rem 2.75rem;
+    background: var(--ma-surface);
+    border: 2px dashed var(--ma-accent);
+    border-radius: 16px;
+    box-shadow: var(--ma-shadow-lg);
+  }
+
+  .drop-overlay-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 46px;
+    color: var(--ma-accent);
+  }
+
+  .drop-overlay-text {
+    font-size: 0.98rem;
+    font-weight: 600;
+    color: var(--ma-fg);
   }
 
   .hint-row .btn {
@@ -1964,16 +2064,15 @@
     padding: 0 0.45rem;
   }
 
-  /* Footer: drop the document statistics first. */
+  /* Footer: the parts of the document go first, then the ones of the
+     reading. The dots go with them, for they are drawn by the stylesheet. */
   @media (max-width: 680px) {
-    #doc-stats,
-    .footer-divider-dot {
+    #doc-stats {
       display: none;
     }
   }
 
   @media (max-width: 480px) {
-    .status-pill-separator,
     .speech-status-chip {
       display: none;
     }

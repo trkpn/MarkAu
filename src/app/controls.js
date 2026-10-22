@@ -317,6 +317,26 @@ function initNetworkStatus() {
 
 function initOfflineSupport() {
   if (!('serviceWorker' in navigator)) return;
+
+  // While the app is being worked on, the service worker would keep
+  // serving the files of an earlier moment: its cache is only replaced
+  // when the app is built again. So in development it goes — and the
+  // caches of an earlier session with it.
+  if (!import.meta.env.PROD) {
+    navigator.serviceWorker
+      .getRegistrations?.()
+      .then((registrations) => registrations.forEach((registration) => registration.unregister()))
+      .catch(() => {});
+
+    if (typeof caches !== 'undefined') {
+      caches
+        .keys()
+        .then((keys) => keys.forEach((key) => caches.delete(key)))
+        .catch(() => {});
+    }
+    return;
+  }
+
   const isLocal =
     window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
   if (window.location.protocol !== 'https:' && !isLocal) return;

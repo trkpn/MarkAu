@@ -1,0 +1,9 @@
+# Cloudflare Pages — MarkAu
+#
+# The `functions/` folder is compiled together with the static build, which
+# gives the app one serverless endpoint: /api/fetch, the proxy that reads
+# pages the browser is not allowed to read on its own.
+
+name = "markau"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "dist"

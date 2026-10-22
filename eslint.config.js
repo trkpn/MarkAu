@@ -50,5 +50,16 @@ export default [
         ...globals.node
       }
     }
+  },
+  {
+    // The proxy runs on the server: the same code serves the dev server and
+    // the Cloudflare function.
+    files: ['server/**/*.js', 'functions/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.serviceworker
+      }
+    }
   }
 ];

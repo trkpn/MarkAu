@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { handleProxyRequest } from './server/proxy-core.js';
+import { handleTranscriptRequest } from './server/youtube-transcript.js';
 
 /**
  * Custom Vite Plugin to automatically inject all compiled assets (JS, CSS, fonts, HTML)
@@ -62,10 +64,13 @@ function swPrecachePlugin() {
 
             // A script that is not part of the first load is fetched on
             // demand — precaching it would download megabytes that most
-            // visitors never need.
+            // visitors never need. The worker of the PDF reader is such a
+            // file: it is only wanted when a PDF is read.
             const isLazyScript =
               rel.endsWith('.js') && state.firstLoad && !state.firstLoad.has(rel.slice(1));
-            if (!isLazyScript) {
+            const isLazyWorker = /\/assets\/pdf\.worker-/.test(rel);
+
+            if (!isLazyScript && !isLazyWorker) {
               fileList.push(rel);
             }
           }
@@ -96,8 +101,57 @@ function swPrecachePlugin() {
   };
 }
 
+/**
+ * Serves the proxy during development.
+ *
+ * In production the proxy is a Cloudflare Pages Function. In development
+ * there is no function runtime, so the very same core is mounted on the
+ * dev server — the behaviour of the two is identical by construction.
+ */
+function devProxyPlugin() {
+  return {
+    name: 'dev-proxy-plugin',
+
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const url = new URL(req.url || '/', 'http://localhost');
+
+        const endpoints = {
+          '/api/fetch': handleProxyRequest,
+          '/api/youtube-transcript': handleTranscriptRequest
+        };
+
+        const handler = endpoints[url.pathname];
+        if (!handler) {
+          next();
+          return;
+        }
+
+        try {
+          const headers = {};
+          for (const name of ['origin', 'referer', 'user-agent', 'accept-language']) {
+            const value = req.headers[name];
+            if (value) headers[name] = value;
+          }
+
+          const request = new Request(url, { method: req.method || 'GET', headers });
+          const response = await handler(request);
+
+          res.statusCode = response.status;
+          response.headers.forEach((value, name) => res.setHeader(name, value));
+          res.end(await response.text());
+        } catch (err) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.end(JSON.stringify({ ok: false, error: String(err?.message || err) }));
+        }
+      });
+    }
+  };
+}
+
 export default defineConfig({
-  plugins: [tailwindcss(), swPrecachePlugin()],
+  plugins: [tailwindcss(), swPrecachePlugin(), devProxyPlugin()],
   server: {
     port: 5173,
     open: false

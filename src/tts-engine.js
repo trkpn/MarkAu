@@ -252,6 +252,12 @@ export function buildChunks(text, locale = 'en-US') {
 }
 
 /**
+ * A time that stands on its own, the way the transcript of a video writes
+ * it: `0:43` or `1:02:03`, with or without brackets.
+ */
+const TIME_ALONE = /^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*$/;
+
+/**
  * Tokenizes the rendered preview into speakable words.
  *
  * This is deliberately NOT called on every keystroke: the preview module marks
@@ -304,6 +310,13 @@ function tokenizeDOMForTTS(rootContainer, locale = 'en-US') {
     }
     // The permalink of a heading is a sign, not a word.
     if (parent.closest('.heading-anchor')) {
+      return true;
+    }
+    // The time of a transcript says where the video is, and it is seen
+    // rather than heard: a reader does not want the time of every line
+    // called out to them.
+    const bold = parent.closest('strong, b');
+    if (bold && TIME_ALONE.test(bold.textContent || '')) {
       return true;
     }
     // A diagram is a picture, not prose — its labels are only read aloud when

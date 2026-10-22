@@ -75,6 +75,17 @@
             <span class="btn-icon-slot" id="icon-paste" aria-hidden="true"></span>
           </button>
 
+          <!-- Import: brings a document in from a web address — a repository
+               README, a model card or an article. -->
+          <button
+            id="btn-import-url"
+            class="btn btn-icon"
+            title="Import from a URL"
+            aria-label="Import a document from a web address"
+          >
+            <span class="btn-icon-slot" id="icon-import-url" aria-hidden="true"></span>
+          </button>
+
           <!-- Reset: empties the document, next to Paste so it is always
                one click away. -->
           <button
@@ -290,14 +301,6 @@
               >
                 <span class="btn-icon-slot" id="icon-save" aria-hidden="true"></span>
               </button>
-              <button
-                class="toolbar-btn"
-                data-action="clear"
-                title="Reset the document"
-                aria-label="Reset the document"
-              >
-                <span class="btn-icon-slot" id="icon-reset-editor" aria-hidden="true"></span>
-              </button>
             </div>
           </div>
 
@@ -385,7 +388,8 @@
         </section>
       </main>
 
-      <!-- Bottom Status Bar -->
+      <!-- Bottom Status Bar: what is happening on the left, what the
+           document is on the right. -->
       <footer
         class="app-footer flex h-8 items-center justify-between border-t border-border bg-bg-2 px-4 text-xs text-fg-muted"
       >
@@ -393,24 +397,30 @@
           <div class="status-pill">
             <span class="status-dot active" id="system-status-dot"></span>
             <span id="system-status-text">Client Ready</span>
-            <span class="status-pill-separator" aria-hidden="true">·</span>
-            <span
-              id="speech-status-chip"
-              class="speech-status-chip"
-              role="status"
-              aria-live="polite"
-              >Click word to listen</span
-            >
           </div>
-          <span class="footer-divider-dot" aria-hidden="true">•</span>
-          <span id="doc-stats">Lines: 1 | Words: 0 | Chars: 0</span>
+          <span
+            id="speech-status-chip"
+            class="speech-status-chip"
+            role="status"
+            aria-live="polite"
+            >Click word to listen</span
+          >
         </div>
 
         <div class="footer-section">
-          <span id="reading-time">Reading time: ~1 min</span>
-          <span id="active-token-info">Tokens: 0</span>
+          <span id="reading-time">~1 min read</span>
+          <span id="active-token-info">0 words ready</span>
+          <span id="doc-stats">Lines: 1 · Chars: 0</span>
         </div>
       </footer>
+
+      <!-- The panel that says what will happen when something is dropped -->
+      <div id="drop-overlay" class="drop-overlay" hidden aria-hidden="true">
+        <div class="drop-overlay-card">
+          <span class="drop-overlay-icon" id="drop-overlay-icon" aria-hidden="true"></span>
+          <p id="drop-overlay-text" class="drop-overlay-text">Drop here</p>
+        </div>
+      </div>
 
       <!-- Preferences & Settings Modal Dialog -->
       <div id="modal-settings" class="modal-backdrop" hidden>
@@ -575,6 +585,34 @@
                 </div>
               </div>
 
+              <!-- Web Import Group -->
+              <div class="settings-section">
+                <div class="settings-section-title">Web import</div>
+                <div class="setting-checkbox-item">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="check-reader-fallback" checked />
+                    <div class="checkbox-text">
+                      <strong>Allow the fallback reader</strong>
+                      <span
+                        >When a page cannot be read at all, its address is handed to a public reader
+                        service. Off: only the proxy of this app is used.</span
+                      >
+                    </div>
+                  </label>
+                </div>
+                <div class="setting-item">
+                  <label for="input-reader-api-key">Fallback reader key</label>
+                  <input
+                    id="input-reader-api-key"
+                    class="api-key-input"
+                    type="password"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="optional"
+                  />
+                </div>
+              </div>
+
               <!-- Narration Group -->
               <div class="settings-section">
                 <div class="settings-section-title">Narration</div>
@@ -639,6 +677,59 @@
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Import from URL Modal Dialog -->
+      <div id="modal-url-import" class="modal-backdrop" hidden>
+        <div
+          class="modal-card modal-card-compact"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-url-import-title"
+        >
+          <div class="modal-header">
+            <div class="modal-title">
+              <span id="icon-import-url-modal" aria-hidden="true"></span>
+              <h3 id="modal-url-import-title">Import from a URL</h3>
+            </div>
+            <button
+              id="btn-close-url-import"
+              class="btn btn-icon"
+              title="Close"
+              aria-label="Close the import dialog"
+            >
+              <span id="icon-close-url-import" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <div class="modal-body">
+            <form id="url-import-form" class="url-import-form">
+              <label class="url-import-label" for="url-import-input">Web address</label>
+              <input
+                id="url-import-input"
+                class="url-import-input"
+                type="url"
+                inputmode="url"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="https://github.com/owner/repository"
+                aria-describedby="url-import-hint"
+              />
+              <p id="url-import-hint" class="hint-text">
+                A GitHub repository, a Hugging Face model, a YouTube video, a Substack post, a
+                Reddit thread, a PDF, a book, a Markdown file — or any article, which is reduced to
+                its main content. The import becomes the document.
+              </p>
+              <p id="url-import-error" class="url-import-error" role="alert"></p>
+              <div class="url-import-actions">
+                <button type="button" id="btn-url-import-cancel" class="btn">Cancel</button>
+                <button type="submit" id="btn-url-import-submit" class="btn btn-primary">
+                  Import
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       </div>

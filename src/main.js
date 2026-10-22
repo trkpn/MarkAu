@@ -16,6 +16,8 @@
  *   app/editor.js         — buffer, draft persistence, replacement detection
  *   app/preview.js        — render pipeline, tokenization, sync scrolling
  *   app/controls.js       — header controls
+ *   app/paste.js          — clipboard paste
+ *   app/url-import.js     — import a document from a web address
  *   app/settings-modal.js — preferences
  *   app/dialog.js         — in-app confirmation dialog
  * ============================================================================
@@ -30,6 +32,8 @@ import { initEditor, setMarkdown, loadDraft, onContentChange } from './app/edito
 import { initPreview } from './app/preview.js';
 import { initControls } from './app/controls.js';
 import { initPaste } from './app/paste.js';
+import { initUrlImport } from './app/url-import.js';
+import { initDragDrop } from './app/drag-drop.js';
 import { initShortcuts } from './app/shortcuts.js';
 import { initMiniPlayer } from './app/mini-player.js';
 import { initOutline, rebuildOutline } from './app/outline.js';
@@ -107,6 +111,8 @@ function initApp() {
   // 3. Chrome
   initControls();
   initPaste();
+  initUrlImport();
+  initDragDrop();
   initShortcuts();
   initMiniPlayer();
   initOutline();

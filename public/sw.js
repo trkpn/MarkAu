@@ -125,6 +125,10 @@ self.addEventListener('fetch', (event) => {
   // Only handle same-origin http/https requests
   if (url.origin !== self.location.origin) return;
 
+  // The proxy answers with live content. Caching it would serve a page
+  // from an earlier moment, so it is left to the network every time.
+  if (url.pathname.startsWith('/api/')) return;
+
   // --- Navigations: fresh when the network is quick, cached otherwise ---
   if (event.request.mode === 'navigate') {
     event.respondWith(

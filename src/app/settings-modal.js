@@ -113,6 +113,12 @@ function syncInputs() {
   if (el.checkVsCodeLinks) {
     el.checkVsCodeLinks.checked = settings.openFileInVsCode !== false;
   }
+  if (el.checkReaderFallback) {
+    el.checkReaderFallback.checked = settings.readerFallback !== false;
+  }
+  if (el.inputReaderApiKey) {
+    el.inputReaderApiKey.value = settings.readerApiKey || '';
+  }
 
   el.splitAxisInputs.forEach((input) => {
     input.checked = input.value === settings.splitAxis;
@@ -301,6 +307,15 @@ export function initSettingsModal() {
   el.checkVsCodeLinks?.addEventListener('change', () => {
     saveSettings({ openFileInVsCode: el.checkVsCodeLinks.checked });
     refreshPreview();
+  });
+
+  // Web import
+  el.checkReaderFallback?.addEventListener('change', () => {
+    saveSettings({ readerFallback: el.checkReaderFallback.checked });
+  });
+
+  el.inputReaderApiKey?.addEventListener('change', () => {
+    saveSettings({ readerApiKey: el.inputReaderApiKey.value.trim() });
   });
 
   // Layout

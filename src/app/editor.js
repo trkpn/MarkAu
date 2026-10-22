@@ -72,8 +72,8 @@ function updateStats() {
   const trimmed = text.trim();
   const wordCount = trimmed ? trimmed.split(/\s+/).length : 0;
 
-  el.docStats.textContent = `Lines: ${lineCount} | Words: ${wordCount} | Chars: ${charCount}`;
-  el.readingTime.textContent = `Reading time: ~${Math.max(1, Math.ceil(wordCount / WORDS_PER_MINUTE))} min`;
+    el.docStats.textContent = `Lines: ${lineCount} · Chars: ${charCount}`;
+    el.readingTime.textContent = `~${Math.max(1, Math.ceil(wordCount / WORDS_PER_MINUTE))} min read`;
 }
 
 /* ==========================================================================
@@ -327,7 +327,7 @@ export function flushDraft() {
  * Loads a Markdown file into the editor.
  * @param {File} file
  */
-async function openFile(file) {
+export async function openFile(file) {
   if (!file) return;
   try {
     const text = await file.text();
@@ -492,10 +492,6 @@ export function initEditor(handlers = {}) {
   document.querySelectorAll('.toolbar-btn[data-action]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const action = btn.dataset.action;
-      if (action === 'clear') {
-        handlers.onClear?.();
-        return;
-      }
       if (action === 'open') {
         el.fileInput?.click();
         return;
@@ -521,26 +517,8 @@ export function initEditor(handlers = {}) {
     event.target.value = '';
   });
 
-  // Drag & drop a Markdown file onto the editor
-  const pane = el.paneEditor;
-  if (pane) {
-    ['dragenter', 'dragover'].forEach((type) => {
-      pane.addEventListener(type, (event) => {
-        event.preventDefault();
-        pane.dataset.dragging = 'true';
-      });
-    });
-    ['dragleave', 'drop'].forEach((type) => {
-      pane.addEventListener(type, (event) => {
-        event.preventDefault();
-        delete pane.dataset.dragging;
-      });
-    });
-    pane.addEventListener('drop', (event) => {
-      const file = event.dataTransfer?.files?.[0];
-      if (file) openFile(file);
-    });
-  }
+  // Drag & drop is handled by the app as a whole — a file, an address or
+  // a piece of text can be dropped anywhere on it.
 
   updateStats();
 }
