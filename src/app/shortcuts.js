@@ -22,6 +22,7 @@ import { applyFormat, flushDraft } from './editor.js';
 import { setView } from './layout.js';
 import { pasteFromClipboard } from './paste.js';
 import { openDialog as openUrlImportDialog } from './url-import.js';
+import { openDialog as openTranslateDialog } from './translate.js';
 import { toggleNarration } from './narration.js';
 import { setMessage } from './status.js';
 
@@ -67,6 +68,7 @@ function ownsSpace(target) {
 function isModalOpen() {
   if (el.modalSettings && !el.modalSettings.hasAttribute('hidden')) return true;
   if (el.modalUrlImport && !el.modalUrlImport.hasAttribute('hidden')) return true;
+  if (el.modalTranslate && !el.modalTranslate.hasAttribute('hidden')) return true;
   return Boolean(document.querySelector('dialog[open]'));
 }
 
@@ -86,6 +88,7 @@ function onKeyDown(event) {
   if (event.key === 'Escape') {
     if (el.modalSettings && !el.modalSettings.hasAttribute('hidden')) return; // handled by the modal
     if (el.modalUrlImport && !el.modalUrlImport.hasAttribute('hidden')) return; // handled by the modal
+    if (el.modalTranslate && !el.modalTranslate.hasAttribute('hidden')) return; // handled by the modal
     if (isSpeaking()) {
       event.preventDefault();
       stop('user');
@@ -155,6 +158,25 @@ function onKeyDown(event) {
   ) {
     event.preventDefault();
     openUrlImportDialog();
+    return;
+  }
+
+  /* ------------------------------------------------------- translate --
+     The same shape as the import shortcut: a command that changes the
+     document, reachable from anywhere outside the editor. Ctrl+Shift+T is
+     not used, because the browser takes it for "reopen the last tab".
+     */
+  if (
+    mod &&
+    event.shiftKey &&
+    !event.altKey &&
+    !inEditor &&
+    !inField &&
+    !isModalOpen() &&
+    event.key.toLowerCase() === 'l'
+  ) {
+    event.preventDefault();
+    openTranslateDialog();
     return;
   }
 

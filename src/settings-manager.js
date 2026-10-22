@@ -19,7 +19,7 @@ const SETTINGS_STORAGE_KEY = 'markau_settings_v1';
  */
 const LEGACY_SETTINGS_KEY = 'markaudio_settings_v1';
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 /** Legacy standalone keys that are folded into the settings payload on load. */
 const LEGACY_KEYS = {
@@ -174,6 +174,8 @@ export const DEFAULT_SETTINGS = {
   // party, so it can be switched off.
   readerFallback: true,
   readerApiKey: '',
+  // Translation: the language the document was last translated into.
+  translateTarget: 'th',
   // Workspace
   view: 'split',
   theme: 'dark',
@@ -251,6 +253,10 @@ export function sanitizeSettings(raw) {
     readerFallback: bool(source.readerFallback, d.readerFallback),
     readerApiKey:
       typeof source.readerApiKey === 'string' ? source.readerApiKey.trim() : d.readerApiKey,
+    translateTarget:
+      typeof source.translateTarget === 'string' && source.translateTarget.trim()
+        ? source.translateTarget.trim()
+        : d.translateTarget,
     view: oneOf(source.view, VIEW_MODES, d.view),
     theme: oneOf(source.theme, THEME_MODES, d.theme),
     // A legacy "auto" value resolves to the arrangement that matches the

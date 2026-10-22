@@ -7,7 +7,7 @@
  */
 export const defaultMarkdown = `# MarkAu
 
-A Markdown editor with a voice that reads along.
+Markdown you can hear — write it, import it, and follow along as it is read aloud.
 
 ## Formatting
 

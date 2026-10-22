@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { handleProxyRequest } from './server/proxy-core.js';
 import { handleTranscriptRequest } from './server/youtube-transcript.js';
+import { handleTranslateRequest } from './server/translate-core.js';
 
 /**
  * Custom Vite Plugin to automatically inject all compiled assets (JS, CSS, fonts, HTML)
@@ -114,11 +115,17 @@ function devProxyPlugin() {
 
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        const url = new URL(req.url || '/', 'http://localhost');
+        // The address of the server has to be the one the browser used,
+        // with the port and all: the endpoints check the origin of a
+        // request against their own, and a request without the port is a
+        // request from somewhere else.
+        const host = req.headers.host || 'localhost';
+        const url = new URL(req.url || '/', `http://${host}`);
 
         const endpoints = {
           '/api/fetch': handleProxyRequest,
-          '/api/youtube-transcript': handleTranscriptRequest
+          '/api/youtube-transcript': handleTranscriptRequest,
+          '/api/translate': handleTranslateRequest
         };
 
         const handler = endpoints[url.pathname];
@@ -129,12 +136,27 @@ function devProxyPlugin() {
 
         try {
           const headers = {};
-          for (const name of ['origin', 'referer', 'user-agent', 'accept-language']) {
+          for (const name of [
+            'origin',
+            'referer',
+            'user-agent',
+            'accept-language',
+            'content-type'
+          ]) {
             const value = req.headers[name];
             if (value) headers[name] = value;
           }
 
-          const request = new Request(url, { method: req.method || 'GET', headers });
+          // A request that carries a body — the translator is asked with
+          // one — has to have the body read and passed on.
+          let body;
+          if (req.method && req.method !== 'GET' && req.method !== 'HEAD') {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            body = Buffer.concat(chunks);
+          }
+
+          const request = new Request(url, { method: req.method || 'GET', headers, body });
           const response = await handler(request);
 
           res.statusCode = response.status;

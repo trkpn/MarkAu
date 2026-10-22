@@ -2021,6 +2021,10 @@
     display: none;
   }
 
+  .app-header[data-hide-translate='true'] #btn-translate {
+    display: none;
+  }
+
   .app-header[data-hide-reset='true'] #btn-reset {
     display: none;
   }

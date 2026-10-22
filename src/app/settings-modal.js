@@ -35,6 +35,7 @@ import { setMessage } from './status.js';
 import { confirmDialog } from './dialog.js';
 import { loadAllLanguages } from '../markdown-parser.js';
 import { defaultMarkdown } from '../sample-markdown.js';
+import { TARGET_LANGUAGES, DEFAULT_TARGET } from '../translation-languages.js';
 
 /**
  * Fills a <select> with the given options.
@@ -119,6 +120,9 @@ function syncInputs() {
   if (el.inputReaderApiKey) {
     el.inputReaderApiKey.value = settings.readerApiKey || '';
   }
+  if (el.selectTranslateLanguage) {
+    el.selectTranslateLanguage.value = settings.translateTarget || DEFAULT_TARGET;
+  }
 
   el.splitAxisInputs.forEach((input) => {
     input.checked = input.value === settings.splitAxis;
@@ -181,6 +185,15 @@ export function initSettingsModal() {
   fillOptions(el.selectAutoSave, AUTO_SAVE_OPTIONS);
   fillOptions(el.selectSaveFormat, SAVE_FORMAT_OPTIONS);
   fillOptions(el.selectLineHeight, LINE_HEIGHT_OPTIONS);
+
+  // The languages the document can be translated into.
+  fillOptions(
+    el.selectTranslateLanguage,
+    TARGET_LANGUAGES.map((language) => ({
+      value: language.code,
+      label: `${language.name} — ${language.english}`
+    }))
+  );
 
   let lastFocused = null;
 
@@ -316,6 +329,11 @@ export function initSettingsModal() {
 
   el.inputReaderApiKey?.addEventListener('change', () => {
     saveSettings({ readerApiKey: el.inputReaderApiKey.value.trim() });
+  });
+
+  // Translation
+  el.selectTranslateLanguage?.addEventListener('change', () => {
+    saveSettings({ translateTarget: el.selectTranslateLanguage.value });
   });
 
   // Layout

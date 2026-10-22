@@ -1,7 +1,7 @@
 {
   "name": "markau",
   "version": "1.1.0",
-  "description": "MarkAu — Markdown Live Preview & Synchronized Audio Reader",
+  "description": "MarkAu — Markdown you can hear. An offline editor with a synchronized audio reader, document import and translation.",
   "type": "module",
   "scripts": {
     "dev": "vite",

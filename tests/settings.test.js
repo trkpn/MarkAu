@@ -43,8 +43,18 @@ describe('sanitizeSettings', () => {
     expect(result.followWhileReading).toBe(false);
   });
 
-  it('falls back to the default for unknown enum values', () => {
-    const result = sanitizeSettings({
+  it('keeps the language the document is translated into', () => {
+    expect(sanitizeSettings({ translateTarget: 'ja' }).translateTarget).toBe('ja');
+  });
+
+  it('falls back to a language for a setting that holds nothing', () => {
+    expect(sanitizeSettings({ translateTarget: '  ' }).translateTarget).toBe(
+      DEFAULT_SETTINGS.translateTarget
+    );
+    expect(sanitizeSettings({}).translateTarget).toBe(DEFAULT_SETTINGS.translateTarget);
+  });
+
+  it('falls back to the default for unknown enum values', () => {    const result = sanitizeSettings({
       theme: 'neon',
       syncMode: 'sideways',
       speechChunk: 'shout',

@@ -3,7 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>MarkAu — Markdown Live Preview & Synchronized Audio Reader</title>
+    <title>MarkAu — Markdown You Can Hear</title>
+    <meta
+      name="description"
+      content="MarkAu is an offline Markdown editor with a synchronized audio reader. Import a page, a video, a paper, a PDF or a book, translate it, and follow along word by word as it is read aloud."
+    />
+    <meta property="og:title" content="MarkAu — Markdown You Can Hear" />
+    <meta
+      property="og:description"
+      content="An offline Markdown editor with a synchronized audio reader: import documents from anywhere, translate them, and follow along as they are read aloud."
+    />
+    <meta property="og:type" content="website" />
     <!-- The stylesheet is linked, not imported by the script: the browser
          renders the styled shell immediately instead of an unstyled flash. -->
     <link rel="stylesheet" href="/src/style.css" />
@@ -20,7 +30,10 @@
       >
         <!-- Zone 1: Brand & Layout Mode Switcher (Standard Left) -->
         <div class="zone-left flex items-center gap-2">
-          <div class="flex items-center gap-2 whitespace-nowrap">
+          <div
+            class="flex items-center gap-2 whitespace-nowrap"
+            title="MarkAu — Markdown you can hear"
+          >
             <span class="brand-mark" aria-hidden="true">M</span>
             <span class="brand-name text-[1.08rem] font-extrabold">
               Mark<span class="brand-accent">Au</span>
@@ -84,6 +97,18 @@
             aria-label="Import a document from a web address"
           >
             <span class="btn-icon-slot" id="icon-import-url" aria-hidden="true"></span>
+          </button>
+
+          <!-- Translate: reads the document in another language. The language
+               it comes from is found on its own — only the language it
+               should end up in is asked for. -->
+          <button
+            id="btn-translate"
+            class="btn btn-icon"
+            title="Translate"
+            aria-label="Translate the document"
+          >
+            <span class="btn-icon-slot" id="icon-translate" aria-hidden="true"></span>
           </button>
 
           <!-- Reset: empties the document, next to Paste so it is always
@@ -613,6 +638,24 @@
                 </div>
               </div>
 
+              <!-- Translation Group -->
+              <div class="settings-section">
+                <div class="settings-section-title">Translation</div>
+                <div class="setting-item">
+                  <label for="select-translate-language">Translate into</label>
+                  <select
+                    id="select-translate-language"
+                    class="select-control modal-select"
+                  ></select>
+                </div>
+                <div class="hint-row">
+                  <p class="hint-text">
+                    The language of the document is found on its own. Only the language it should
+                    end up in is asked for.
+                  </p>
+                </div>
+              </div>
+
               <!-- Narration Group -->
               <div class="settings-section">
                 <div class="settings-section-title">Narration</div>
@@ -727,6 +770,65 @@
                 <button type="button" id="btn-url-import-cancel" class="btn">Cancel</button>
                 <button type="submit" id="btn-url-import-submit" class="btn btn-primary">
                   Import
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Translate Modal Dialog -->
+      <div id="modal-translate" class="modal-backdrop" hidden>
+        <div
+          class="modal-card modal-card-compact"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-translate-title"
+        >
+          <div class="modal-header">
+            <div class="modal-title">
+              <span id="icon-translate-modal" aria-hidden="true"></span>
+              <h3 id="modal-translate-title">Translate</h3>
+            </div>
+            <button
+              id="btn-close-translate"
+              class="btn btn-icon"
+              title="Close"
+              aria-label="Close the translation dialog"
+            >
+              <span id="icon-close-translate" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <div class="modal-body">
+            <form id="translate-form" class="url-import-form">
+              <label class="url-import-label" for="select-translate-target">
+                Translate into
+              </label>
+              <select
+                id="select-translate-target"
+                class="select-control modal-select"
+                aria-describedby="translate-hint"
+              ></select>
+              <p id="translate-hint" class="hint-text">
+                The language the document is in is found on its own — only the language it should
+                end up in is asked for. Code, formulas and links are kept as they are.
+              </p>
+              <p id="translate-scope" class="hint-text"></p>
+              <p id="translate-error" class="url-import-error" role="alert"></p>
+              <div class="url-import-actions">
+                <button
+                  type="button"
+                  id="btn-translate-restore"
+                  class="btn btn-sm"
+                  title="Put the document back the way it was before the translation"
+                  hidden
+                >
+                  Restore the original
+                </button>
+                <button type="button" id="btn-translate-cancel" class="btn">Cancel</button>
+                <button type="submit" id="btn-translate-run" class="btn btn-primary">
+                  Translate
                 </button>
               </div>
             </form>

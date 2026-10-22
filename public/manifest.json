@@ -1,7 +1,7 @@
 {
-  "name": "MarkAu - Markdown Live Preview & Synchronized Audio Reader",
+  "name": "MarkAu — Markdown You Can Hear",
   "short_name": "MarkAu",
-  "description": "High-performance, offline-capable Markdown editor with real-time TTS audio synchronization",
+  "description": "An offline Markdown editor with a synchronized audio reader: import documents from anywhere, translate them, and follow along as they are read aloud.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#090d16",

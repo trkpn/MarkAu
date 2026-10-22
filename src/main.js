@@ -2,7 +2,8 @@
  * ============================================================================
  * MARKUDIO — APPLICATION BOOTSTRAP
  * ============================================================================
- * MarkAu is a Markdown live preview with a synchronized audio reader.
+ * MarkAu is a Markdown editor you can hear — a live preview with a
+ * synchronized audio reader.
  * Everything runs locally in the browser: no server, no network fonts.
  *
  * Module map:
@@ -18,6 +19,7 @@
  *   app/controls.js       — header controls
  *   app/paste.js          — clipboard paste
  *   app/url-import.js     — import a document from a web address
+ *   app/translate.js      — translate the document into another language
  *   app/settings-modal.js — preferences
  *   app/dialog.js         — in-app confirmation dialog
  * ============================================================================
@@ -33,6 +35,7 @@ import { initPreview } from './app/preview.js';
 import { initControls } from './app/controls.js';
 import { initPaste } from './app/paste.js';
 import { initUrlImport } from './app/url-import.js';
+import { initTranslate } from './app/translate.js';
 import { initDragDrop } from './app/drag-drop.js';
 import { initShortcuts } from './app/shortcuts.js';
 import { initMiniPlayer } from './app/mini-player.js';
@@ -112,6 +115,7 @@ function initApp() {
   initControls();
   initPaste();
   initUrlImport();
+  initTranslate();
   initDragDrop();
   initShortcuts();
   initMiniPlayer();

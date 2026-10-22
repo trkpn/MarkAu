@@ -32,7 +32,10 @@ const STATIC_ASSETS = [
   '/src/tts-engine.js',
   '/src/stt-engine.js',
   '/src/settings-manager.js',
-  '/src/sample-markdown.js'
+  '/src/sample-markdown.js',
+  '/src/translation.js',
+  '/src/translation-languages.js',
+  '/src/translation-provider.js'
 ];
 
 /** How long the network may delay a navigation before the cache is used. */

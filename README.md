@@ -1,6 +1,8 @@
 # MarkAu
 
-A fast, lightweight and offline-capable Markdown editor with real-time text-to-speech (TTS) audio narration and voice dictation. Runs 100% in your browser — the only server piece is an optional one-function proxy that reads the web pages a browser is not allowed to read.
+**Markdown you can hear.**
+
+A fast, lightweight and offline-capable Markdown editor with real-time text-to-speech (TTS) audio narration and voice dictation. Import a page, a video, a paper, a PDF or a book; translate it; then follow along word by word as it is read aloud to you. Runs 100% in your browser — the only server piece is an optional one-function proxy that reads the web pages a browser is not allowed to read.
 
 ---
 
@@ -11,6 +13,7 @@ A fast, lightweight and offline-capable Markdown editor with real-time text-to-s
 - **YouTube, Substack and Reddit:** A video becomes a document with its title, channel, length, date, description, chapters and its transcript. A post of a Substack publication becomes the post, with a note when only the open part could be read. A thread becomes the post and its comments; a subreddit becomes the list of its latest posts.
 - **arXiv papers:** A paper becomes a document with its title, authors, subjects, the journal it was published in, its abstract — and the paper itself, drawn by arXiv from the LaTeX of the author. Every formula keeps the LaTeX it was written in, so the app draws it with KaTeX.
 - **Drag and drop:** Something can be dropped on the app, and the app knows what to do with it. A file of text is opened, an address is imported, a piece of text lands in the document, a PDF or a book is read. A panel says which of them will happen before anything is dropped.
+- **Translation:** A button next to Import reads the document in another language. Only the language it should end up in is asked for — the language it comes from is found on its own, and reported back afterwards. The structure of the document survives: code, formulas, links, images and tables are kept as they are, and only the words around them are translated. A selection in the editor is translated on its own; without one, the whole document is translated and becomes the document. The original is kept, so the translation can be taken back.
 - **PDF and EPUB:** A PDF is read with the reader the browsers use (pdf.js): the text of the pages is taken out of the drawings. A book in EPUB form is opened in the browser — it is a bundle of HTML pages — and every chapter is turned into Markdown, so a whole book becomes one document. Both are loaded on demand.
 - **Split View Editor:** Real-time Markdown preview with syntax highlighting (Highlight.js) and LaTeX math formulas (KaTeX).
 - **Mermaid diagrams:** A ` ```mermaid ` fence is drawn as a real diagram in the preview — flowcharts, sequence diagrams, class diagrams, state machines and the rest of the Mermaid catalogue. The diagram follows the app theme, can be zoomed, panned and downloaded as an SVG, and a broken diagram shows the error next to its source instead of failing silently.
@@ -82,6 +85,7 @@ npm run build
 | `Ctrl`/`Cmd` + `S`                     | Save the draft now                                             |
 | `Ctrl`/`Cmd` + `Shift` + `V`         | Paste the clipboard into the document                           |
 | `Ctrl`/`Cmd` + `Shift` + `U`         | Import a document from a web address                           |
+| `Ctrl`/`Cmd` + `Shift` + `L`         | Translate the document into another language                    |
 | `1` / `2` / `3` _(outside the editor)_ | Editor / Split / Preview view                                  |
 | `←` `→` _(splitter focused)_           | Shrink / grow the editor pane                                  |
 | `Home` / `End` _(splitter focused)_    | Jump to the minimum / maximum size                             |
@@ -109,6 +113,9 @@ src/
 ├── pdf-to-markdown.js      # A PDF — the text of the pages (pdf.js)
 ├── epub-to-markdown.js     # A book — its chapters (EPUB is a bundle of pages)
 ├── frontmatter.js          # The YAML-ish block that may open a document
+├── translation.js          # Markdown → a plan the translator can carry out → Markdown
+├── translation-languages.js # The languages the document can be translated into
+├── translation-provider.js # The talk with the translator — runs on the server and in the browser
 ├── tts-engine.js           # Speech synthesis, word highlighting, playback watchdog
 ├── stt-engine.js           # Speech recognition (dictation)
 ├── icons.js                # Inline SVG icons
@@ -126,6 +133,7 @@ src/
     ├── drag-drop.js        # A file, an address or a piece of text, dropped on the app
     ├── url-import.js       # Import a document from a web address
     ├── url-sources.js      # What a URL points at — GitHub, Hugging Face, YouTube, Substack, Reddit, file, page
+    ├── translate.js        # Translate the document into another language
     ├── print.js            # Printing and PDF export of the rendered document
     ├── preview.js          # Render pipeline, lazy tokenization, sync scrolling
     ├── controls.js         # Playback, voice, dictation, theme, network, PWA
@@ -133,11 +141,13 @@ src/
     └── dialog.js           # In-app confirmation dialog
 server/
 ├── proxy-core.js           # The proxy that reads pages the browser may not read
-└── youtube-transcript.js   # The transcript of a video, read on the server
+├── youtube-transcript.js   # The transcript of a video, read on the server
+└── translate-core.js       # The translation, read on the server
 functions/
 └── api/
     ├── fetch.js            # Cloudflare Pages Function — mounts the proxy at /api/fetch
-    └── youtube-transcript.js  # …and the transcript at /api/youtube-transcript
+    ├── youtube-transcript.js  # …and the transcript at /api/youtube-transcript
+    └── translate.js        # …and the translation at /api/translate
 tests/                      # Vitest unit tests for the pure logic
 ```
 
@@ -161,6 +171,20 @@ Some sites need more than a general reader:
 - **YouTube** — the transcript is the caption track of the video. The track that the page names is guarded by a token that only a player can produce, and the answer of the server is an empty one. The other way in is the address that the players of the apps use: it asks for the video with the voice of the app for Android, and the answer carries the captions that can be read right away. That address does not allow a call from a browser at all — it answers with the address of the caller in the wrong shape and no permission — so the work is done by the server, at `/api/youtube-transcript`. Only the address of the video is taken from the caller; the address that is fetched is fixed in the code.
 - **arXiv** — the metadata of the paper comes from the API of arXiv, the paper itself from the form arXiv draws from the LaTeX of the author. The formulas of that form are MathML, but every one of them keeps the LaTeX it was written in — so the formula is put back the way it was written, and the app draws it. The little differences between LaTeX and the renderer of the app — an empty argument of an environment, a reference to a label — are taken care of along the way. A paper that arXiv has not drawn is read out of its PDF instead; the prose is there, the formulas are not.
 
+### Translating a document
+
+The user says where the text should end up; the language it comes from is found by the translator itself and reported back afterwards.
+
+The translator knows nothing about Markdown, so the document is taken apart before it goes anywhere:
+
+- **What carries meaning on its own is set aside** — the front matter, the fenced blocks of code (the diagrams of Mermaid among them), the blocks of mathematics, the lines of HTML. None of it is ever sent away.
+- **What only carries structure is lifted off** — the `#` of a heading, the `-` of a list, the `|` of a table. It is put back afterwards, so the shape of the document is the same before and after.
+- **The words in between are marked with a token** — the name of a function, the destination of a link, the marks of an emphasis. The translator moves them around as a whole and cannot split them. A token that comes back changed, missing or doubled means that the structure was damaged, and then that piece of the document is left as it was: a document that is half-translated is better than a document whose code no longer compiles.
+
+The translation is asked for at `/api/translate`, a Cloudflare Pages Function. The address of the translator stays out of the app, and a refusal is tried again. But the server of a site on Cloudflare shares its address with every other site on it — and the translator counts what it does per address — so when the server says that the translator is busy, the browser asks the translator itself: every visitor has an address of their own, and the answer is the same. A refusal is never the end of the story: the request is made again after a pause, a few times, before the user is told about it.
+
+The translator counts its clients apart, and one of them can be refused for hours while the others answer. So the app asks with one client after another and remembers the one that worked — the next request goes straight to it.
+
 ### Reliability guarantees
 
 - **No ghost audio.** The preview DOM is only rewritten after narration has been stopped, so an utterance can never describe a document that no longer exists.
@@ -170,6 +194,7 @@ Some sites need more than a general reader:
 - **Small first load.** Only the 36 most common syntax highlighting languages are bundled; the full set is fetched on demand. Mermaid works the same way — the diagram parsers are only downloaded when a document actually contains a diagram, and the service worker keeps them for the next offline start. The page reader is loaded the same way: a visitor who never imports a web page never downloads Readability or Turndown.
 - **A fetched page cannot hurt the document.** The HTML of a page is read in an inert document where no script runs, and the result is converted to plain Markdown before it reaches the editor — where it goes through the same sanitizer as everything else.
 - **Diagrams are not read aloud.** A Mermaid diagram is a picture, not prose: its labels stay out of the narration and out of the word count — unless the preference "Read diagram labels aloud" is switched on.
+- **A translation cannot break the document.** Code, formulas, links and images are never sent to the translator, and a piece whose structure came back damaged is left as it was rather than written into the document broken.
 
 ---
 

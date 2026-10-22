@@ -58,6 +58,7 @@ export const el = {
   btnPrint: document.getElementById('btn-print'),
   btnPaste: document.getElementById('btn-paste'),
   btnImportUrl: document.getElementById('btn-import-url'),
+  btnTranslate: document.getElementById('btn-translate'),
   btnReset: document.getElementById('btn-reset'),
   btnSyncScroll: document.getElementById('btn-sync-scroll'),
   btnSplitAxis: document.getElementById('btn-split-axis'),
@@ -89,6 +90,7 @@ export const el = {
   storageUsageText: document.getElementById('storage-usage-text'),
   checkReaderFallback: document.getElementById('check-reader-fallback'),
   inputReaderApiKey: document.getElementById('input-reader-api-key'),
+  selectTranslateLanguage: document.getElementById('select-translate-language'),
 
   // Import from URL modal
   modalUrlImport: document.getElementById('modal-url-import'),
@@ -100,6 +102,18 @@ export const el = {
   btnUrlImportSubmit: document.getElementById('btn-url-import-submit'),
   btnUrlImportCancel: document.getElementById('btn-url-import-cancel'),
   btnCloseUrlImport: document.getElementById('btn-close-url-import'),
+
+  // Translation modal
+  modalTranslate: document.getElementById('modal-translate'),
+  translateForm: document.getElementById('translate-form'),
+  translateTarget: document.getElementById('select-translate-target'),
+  translateScope: document.getElementById('translate-scope'),
+  translateError: document.getElementById('translate-error'),
+  btnTranslateRun: document.getElementById('btn-translate-run'),
+  btnTranslateCancel: document.getElementById('btn-translate-cancel'),
+  btnTranslateRestore: document.getElementById('btn-translate-restore'),
+  btnCloseTranslate: document.getElementById('btn-close-translate'),
+
   splitAxisInputs: Array.from(document.querySelectorAll('input[name="split-axis"]')),
   splitRatioSlider: document.getElementById('split-ratio-slider'),
   splitRatioBadge: document.getElementById('split-ratio-badge'),
@@ -137,6 +151,9 @@ const ICON_MAPPINGS = {
   'icon-import-url': icons.link,
   'icon-import-url-modal': icons.link,
   'icon-close-url-import': icons.close,
+  'icon-translate': icons.translate,
+  'icon-translate-modal': icons.translate,
+  'icon-close-translate': icons.close,
   'icon-drop-overlay': icons.drop,
   'icon-reset': icons.reset,
   'icon-open': icons.open,
