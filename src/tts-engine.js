@@ -20,19 +20,38 @@
  *    and viewport-relative math, not `offsetTop` against a wrong offsetParent.
  * 6. O(1) TOKEN LOOKUP — a Map keeps click-to-speak instant even for
  *    documents with tens of thousands of words.
+ * 7. RIGHT LANGUAGE — the narration speaks in the language of the document
+ *    (`th-TH` for Thai), so the engine picks a matching voice and splits the
+ *    text at its own sentence and word boundaries. Without it a Thai document
+ *    was segmented as English: one enormous chunk that the browser drops
+ *    after ~15 seconds, which is what a reading that "stutters and then
+ *    stops" sounds like.
+ * 8. NO SILENT DEATH — a chunk that the browser drops is retried, not
+ *    abandoned: the whole reading only ends when the queue is empty.
  * ============================================================================
  */
 
 import { getSettings } from './settings-manager.js';
+import { announceNarrationStart, onOtherTabNarrationStart } from './multi-tab.js';
 
 // Module-level persistent state (Immune to Garbage Collection)
-let currentUtterance = null;
-let keepAliveTimer = null;
 let speakDebounceTimer = null;
 let currentSessionId = 0;
 
 /** The remaining speech chunks, head first. */
 let chunkQueue = [];
+/** Index of the next chunk to hand to the engine. */
+let chunkCursor = 0;
+/** Index of the first chunk that has not finished yet. */
+let chunkDone = 0;
+/** The delayed restart after a chunk failed. */
+let chunkTimer = null;
+/** The next hand-over to the engine, outside its own event handlers. */
+let pumpTimer = null;
+/** Every utterance handed to the engine that has not finished yet. */
+const liveUtterances = new Set();
+/** How many times the current chunk has failed to start. */
+let chunkRetries = 0;
 
 // Speech synthesis status
 let isPlaying = false;
@@ -40,7 +59,6 @@ let isPaused = false;
 /** True between the Play press and the moment the engine actually starts. */
 let isStarting = false;
 let currentWordIndex = -1;
-let currentUtteranceOffset = 0;
 
 // Token index and speech text
 let tokens = []; // Array of { id, element, text, charStart, charEnd }
@@ -65,10 +83,11 @@ let autoScrollEnabled = true;
 const stateListeners = new Set();
 
 // Playback health tracking
-let playingSince = 0;
+/** When the engine last showed a sign of life (start or word boundary). */
+let lastProgressAt = 0;
+/** When the engine last fired an event of its own (start, boundary or end). */
+let lastEventAt = 0;
 let restartAttempts = 0;
-let lastWordIndexAtRestart = -1;
-let keepAlivePing = false;
 
 /* ==========================================================================
  * State notification
@@ -165,17 +184,17 @@ export function setRate(rate) {
 }
 
 /**
- * Inspects content to guess the dominant locale.
- * @param {string} text
- * @returns {string} Locale code
+ * Tells the engine which language the document is written in.
+ *
+ * The voice, the sentence boundaries and the word boundaries all follow it,
+ * so a Thai document is not spoken as if it were English.
+ *
+ * @param {string} locale
  */
-export function detectLanguage(text) {
-  if (!text) return 'en-US';
-  const thaiMatches = text.match(/[\u0E00-\u0E7F]/g);
-  if (thaiMatches && thaiMatches.length > text.length * 0.25) {
-    return 'th-TH';
-  }
-  return 'en-US';
+export function setDocumentLocale(locale) {
+  if (!locale || locale === documentLocale) return;
+  documentLocale = locale;
+  tokensAreStale = true;
 }
 
 /* ==========================================================================
@@ -213,21 +232,107 @@ export function setAutoScrollEnabled(enabled) {
 }
 
 /**
+ * How much text one request to the speech engine should carry.
+ *
+ * One sentence per request sounds natural on paper but not in the ear: the
+ * engine finishes a sentence, the next request has to be synthesised, and
+ * the reading stumbles to a halt between every one of them — especially
+ * with a voice that is fetched over the network. Grouping the sentences of a
+ * paragraph into one request keeps the voice going, while a ceiling keeps
+ * every request under the ~15 seconds at which Chromium cuts an utterance
+ * off. The ceiling follows the playback rate: at half speed a request may
+ * only carry half the text.
+ *
+ * A Latin letter is a fraction of a syllable, a Thai letter is most of one
+ * and a Han character is a whole word, so the character budget depends on
+ * the writing system; the Latin figure alone makes a Thai or Chinese
+ * request take far longer than intended.
+ */
+const SPEECH_CHARS_PER_SECOND = 14;
+const SPEECH_CHUNK_SECONDS = 10;
+
+/** How many characters one second of narration carries, by language. */
+const CHARS_PER_SECOND_BY_LANGUAGE = {
+  th: 11,
+  lo: 11,
+  km: 11,
+  my: 11,
+  ja: 6,
+  zh: 6,
+  ko: 7
+};
+
+/** Where a group of sentences is closed: near the ceiling, to cut rarely. */
+const CHUNK_TARGET_RATIO = 0.85;
+
+/**
+ * Cuts a character range into requests no longer than the ceiling.
+ *
+ * The cuts fall on a space when there is one nearby, so a request rarely
+ * begins in the middle of a word; the ranges are taken from the source, so
+ * the highlighting offsets stay exact.
+ *
+ * @param {string} text
+ * @param {Array<{ charStart: number, charEnd: number }>} groups
+ * @param {number} ceiling
+ * @param {number} target
+ * @returns {Array<{ text: string, charStart: number, charEnd: number }>}
+ */
+function splitToCeiling(text, groups, ceiling, target) {
+  const chunks = [];
+
+  for (const group of groups) {
+    let cursor = group.charStart;
+    while (group.charEnd - cursor > ceiling) {
+      const limit = cursor + ceiling;
+      const space = text.lastIndexOf(' ', limit);
+      const cut = space > cursor + target / 2 ? space + 1 : limit;
+      chunks.push({ charStart: cursor, charEnd: cut, text: text.slice(cursor, cut) });
+      cursor = cut;
+    }
+    if (group.charEnd > cursor) {
+      chunks.push({
+        charStart: cursor,
+        charEnd: group.charEnd,
+        text: text.slice(cursor, group.charEnd)
+      });
+    }
+  }
+
+  return chunks;
+}
+
+/** How many characters one second of narration carries in a language. */
+function charsPerSecond(locale) {
+  const language = String(locale || '')
+    .slice(0, 2)
+    .toLowerCase();
+  return CHARS_PER_SECOND_BY_LANGUAGE[language] || SPEECH_CHARS_PER_SECOND;
+}
+
+/**
  * Splits the speech text into chunks.
  *
- * In `block` mode there is a single chunk (the rest of the document); in
- * `sentence` mode the text is split at sentence boundaries and the chunks
- * are spoken one after the other.
+ * In `sentence` mode the text is cut at sentence boundaries and the
+ * sentences are grouped into requests that keep the narration continuous.
+ * In `block` mode the cuts fall wherever the ceiling lands, but there is
+ * still a ceiling: a single request for a whole document is cut off by
+ * Chromium after about fifteen seconds.
  *
  * @param {string} text
  * @param {string} locale
+ * @param {number} [rate] playback rate, from 0.5 to 2
  * @returns {Array<{ text: string, charStart: number, charEnd: number }>}
  */
-export function buildChunks(text, locale = 'en-US') {
+export function buildChunks(text, locale = 'en-US', rate = currentRate) {
   if (!text) return [];
 
+  const ceiling = Math.max(40, Math.round(charsPerSecond(locale) * SPEECH_CHUNK_SECONDS * rate));
+  const target = Math.round(ceiling * CHUNK_TARGET_RATIO);
+
   if (getSettings().speechChunk !== 'sentence') {
-    return [{ text, charStart: 0, charEnd: text.length }];
+    const chunks = splitToCeiling(text, [{ charStart: 0, charEnd: text.length }], ceiling, target);
+    return chunks.length > 0 ? chunks : [{ text, charStart: 0, charEnd: text.length }];
   }
 
   let segmenter;
@@ -241,12 +346,40 @@ export function buildChunks(text, locale = 'en-US') {
     segmenter = new Intl.Segmenter('en', { granularity: 'sentence' });
   }
 
-  const chunks = [];
+  // Sentences are gathered into groups; the character ranges are taken from
+  // the source text, so the highlighting offsets stay exact.
+  const groups = [];
+  let start = -1;
+  let end = -1;
+
+  const close = () => {
+    if (start === -1) return;
+    groups.push({ charStart: start, charEnd: end, text: text.slice(start, end) });
+    start = -1;
+    end = -1;
+  };
+
   for (const segment of segmenter.segment(text)) {
     const value = segment.segment;
-    if (!value.trim()) continue;
-    chunks.push({ text: value, charStart: segment.index, charEnd: segment.index + value.length });
+    const segStart = segment.index;
+    const segEnd = segStart + value.length;
+
+    if (!value.trim()) {
+      if (start !== -1) end = segEnd;
+      continue;
+    }
+
+    if (start === -1) {
+      start = segStart;
+    }
+    end = segEnd;
+
+    if (end - start >= target) close();
   }
+  close();
+
+  const chunks = splitToCeiling(text, groups, ceiling, target);
+
   if (chunks.length > 0) return chunks;
   return text.trim() ? [{ text, charStart: 0, charEnd: text.length }] : [];
 }
@@ -566,22 +699,42 @@ function scrollWordIntoView(el) {
 /* ==========================================================================
  * Playback
  * ==========================================================================
- * The document is spoken in "chunks". In `block` mode there is a single
- * chunk (the rest of the document); in `sentence` mode the text is split at
- * sentence boundaries and the chunks are spoken one after the other.
+ * The document is spoken in "chunks" — a paragraph, or as many sentences as
+ * fit in one request. Two things matter for how it sounds:
  *
- * Chunking matters: a single utterance for a 400 kB document exceeds what
- * speech engines accept, and long utterances are read back stuttering or
- * truncated. Each chunk keeps its own character offset, so the word
- * highlight still lines up exactly.
+ *   1. The engine's queue is fed ahead. The next request is handed to the
+ *      browser while the current one is still being spoken, so the voice
+ *      does not fall silent (and go looking for the next sentence) after
+ *      every pause. A request that the browser refuses is asked for again
+ *      rather than abandoned.
+ *   2. The chunks are neither too small nor too long. One sentence per
+ *      request is a stall between every sentence; one request for the whole
+ *      document is cut off by Chromium after about fifteen seconds. The
+ *      ceiling follows the playback rate, and each chunk keeps its own
+ *      character offset, so the word highlight still lines up exactly.
  * ========================================================================== */
+
+/** How many times one chunk may be retried before it is skipped. */
+const CHUNK_RETRY_LIMIT = 3;
+/** How many requests the engine may hold: one speaking, one warming up. */
+const PREFETCH_DEPTH = 2;
+/** How quiet the engine may be before the watchdog takes it as lost. */
+const SILENCE_GRACE_MS = 1800;
+/** A chunk is never longer than this; silence past it means a stuck engine. */
+const STALL_MS = 13000;
+/** The pause before a failed chunk is asked for again. */
+const ERROR_RESTART_MS = 150;
 
 /**
  * Prepares the chunk queue so that reading starts at a character offset.
  * @param {number} startChar
  */
 function prepareChunks(startChar) {
-  const all = buildChunks(fullSpeechText, documentLocale);
+  const all = buildChunks(fullSpeechText, documentLocale, currentRate);
+  chunkCursor = 0;
+  chunkDone = 0;
+  chunkRetries = 0;
+
   if (all.length === 0) {
     chunkQueue = [];
     return;
@@ -603,81 +756,128 @@ function prepareChunks(startChar) {
 }
 
 /**
- * Speaks the chunk at the head of the queue.
+ * Keeps the engine's queue fed.
+ *
+ * One request is spoken while the next one is already waiting in the
+ * browser, so the hand-off costs no silence. Every engine event calls this,
+ * which makes it safe to call from anywhere.
+ *
  * @param {number} sessionId
  */
-function speakCurrentChunk(sessionId) {
-  const chunk = chunkQueue[0];
-  if (!chunk) {
-    finishPlayback();
-    return;
+function pumpChunks(sessionId) {
+  if (sessionId !== currentSessionId) return;
+
+  while (chunkCursor - chunkDone < PREFETCH_DEPTH && chunkCursor < chunkQueue.length) {
+    const index = chunkCursor;
+    chunkCursor += 1;
+    speakChunk(chunkQueue[index], index, sessionId);
   }
 
-  currentUtteranceOffset = chunk.charStart;
+  if (chunkDone >= chunkQueue.length && chunkCursor >= chunkQueue.length) {
+    finishPlayback();
+  }
+}
 
+/**
+ * Schedules the next hand-over outside the engine's own event handlers.
+ *
+ * Chromium can swallow a `speak()` that is called synchronously from inside
+ * `onend` (or `onstart`): the utterance is accepted and never spoken, and
+ * the reading only resumes when the watchdog notices the silence. A turn of
+ * the loop is enough to leave the event and keep the queue fed.
+ *
+ * @param {number} sessionId
+ * @param {number} [delay]
+ */
+function schedulePump(sessionId, delay = 0) {
+  if (pumpTimer) clearTimeout(pumpTimer);
+  pumpTimer = setTimeout(() => {
+    pumpTimer = null;
+    pumpChunks(sessionId);
+  }, delay);
+}
+
+/**
+ * Hands one chunk to the speech engine.
+ *
+ * @param {{ text: string, charStart: number, charEnd: number }} chunk
+ * @param {number} index position of the chunk in the queue
+ * @param {number} sessionId
+ */
+function speakChunk(chunk, index, sessionId) {
   const utterance = new SpeechSynthesisUtterance(chunk.text);
-  currentUtterance = utterance;
+  liveUtterances.add(utterance);
   window.__currentTTSUtterance = utterance;
 
   if (currentVoice) utterance.voice = currentVoice;
+  // A voice the reader picked explicitly knows its own language; otherwise
+  // the document decides.
+  utterance.lang = currentVoice?.lang || documentLocale;
   utterance.rate = currentRate;
   utterance.pitch = currentPitch;
 
   utterance.onboundary = (event) => {
-    if (sessionId !== currentSessionId) return;
-    const globalChar = currentUtteranceOffset + event.charIndex;
+    if (sessionId !== currentSessionId || utterance.__canceled) return;
+    lastEventAt = Date.now();
+    noteProgress();
+    const globalChar = chunk.charStart + event.charIndex;
     const matchedTokenIndex = findTokenByCharIndex(globalChar);
     if (matchedTokenIndex >= 0) setActiveWord(matchedTokenIndex);
   };
 
   utterance.onstart = () => {
-    if (sessionId !== currentSessionId) return;
+    if (sessionId !== currentSessionId || utterance.__canceled) return;
+    lastEventAt = Date.now();
     isPlaying = true;
     isPaused = false;
     isStarting = false;
-    playingSince = Date.now();
+    noteProgress();
     const active = tokens[currentWordIndex];
     if (active?.element) active.element.classList.remove('speaking-target');
     notifyState({ isPlaying: true, isPaused: false, starting: false });
-    startKeepAlive();
     clearStartWatchdog();
+    // This chunk is playing now — keep the queue one request ahead.
+    schedulePump(sessionId);
   };
 
   utterance.onpause = () => {
-    if (sessionId !== currentSessionId) return;
-    // The keep-alive heartbeat deliberately pauses/resumes the utterance —
-    // that must not surface as a user-visible pause.
-    if (keepAlivePing) return;
+    if (sessionId !== currentSessionId || utterance.__canceled) return;
     isPaused = true;
     notifyState({ isPlaying: true, isPaused: true });
   };
 
   utterance.onresume = () => {
-    if (sessionId !== currentSessionId) return;
-    if (keepAlivePing) return;
+    if (sessionId !== currentSessionId || utterance.__canceled) return;
+    lastEventAt = Date.now();
     isPaused = false;
     notifyState({ isPlaying: true, isPaused: false });
   };
 
   utterance.onend = () => {
-    if (sessionId !== currentSessionId) return;
-    cleanupUtterance();
-    if (chunkQueue.length > 1) {
-      chunkQueue.shift();
-      speakCurrentChunk(sessionId);
-      return;
-    }
-    finishPlayback();
+    if (sessionId !== currentSessionId || utterance.__canceled) return;
+    liveUtterances.delete(utterance);
+    // Chunks finish in order; an `onend` from a chunk that was cancelled and
+    // handed over again must not count as progress.
+    lastEventAt = Date.now();
+    if (index === chunkDone) chunkDone += 1;
+    chunkRetries = 0;
+    noteProgress();
+    schedulePump(sessionId);
   };
 
   utterance.onerror = (event) => {
-    if (sessionId !== currentSessionId) return;
-    if (event.error !== 'canceled' && event.error !== 'interrupted') {
-      console.warn('SpeechSynthesisUtterance error:', event.error);
-    }
-    cleanupUtterance();
-    finishPlayback();
-    notifyState({ isPlaying: false, isPaused: false, currentWordIndex: -1, reason: 'error' });
+    if (sessionId !== currentSessionId || utterance.__canceled) return;
+    liveUtterances.delete(utterance);
+    // A request that failed is over; anything the browser reports for it
+    // afterwards is stale and must not move the reading forward.
+    utterance.__canceled = true;
+
+    // Our own `cancel()` — a new session, or a chunk handed over again — is
+    // not an error.
+    if (event.error === 'canceled' || event.error === 'interrupted') return;
+
+    console.warn('SpeechSynthesisUtterance error:', event.error || 'unknown');
+    retryFromChunk(index, sessionId);
   };
 
   if (window.speechSynthesis.paused) {
@@ -687,16 +887,78 @@ function speakCurrentChunk(sessionId) {
 }
 
 /**
+ * Starts the reading again from a chunk that the engine failed on.
+ *
+ * The requests already queued behind it are dropped (their `canceled`
+ * events are ignored), so the failed chunk is spoken in its place and the
+ * rest of the document follows.
+ *
+ * @param {number} index
+ * @param {number} sessionId
+ */
+function retryFromChunk(index, sessionId) {
+  if (sessionId !== currentSessionId) return;
+
+  chunkRetries += 1;
+
+  if (chunkRetries > CHUNK_RETRY_LIMIT) {
+    console.warn('Speech chunk skipped after', CHUNK_RETRY_LIMIT, 'retries');
+    chunkRetries = 0;
+    chunkCursor = Math.max(chunkCursor, index + 1);
+    chunkDone = Math.max(chunkDone, index + 1);
+    schedulePump(sessionId);
+    return;
+  }
+
+  cancelEngine();
+  chunkCursor = index;
+  chunkDone = index;
+  clearChunkTimer();
+  chunkTimer = setTimeout(() => {
+    chunkTimer = null;
+    if (sessionId !== currentSessionId) return;
+    pumpChunks(sessionId);
+  }, ERROR_RESTART_MS * chunkRetries);
+}
+
+function clearChunkTimer() {
+  if (chunkTimer === null) return;
+  clearTimeout(chunkTimer);
+  chunkTimer = null;
+}
+
+function clearPumpTimer() {
+  if (pumpTimer === null) return;
+  clearTimeout(pumpTimer);
+  pumpTimer = null;
+}
+
+/**
+ * Records that the engine is alive, so the watchdog does not interfere.
+ */
+function noteProgress() {
+  lastProgressAt = Date.now();
+  restartAttempts = 0;
+}
+
+/**
  * Ends the narration cleanly.
  */
 function finishPlayback() {
   cleanupUtterance();
+  clearChunkTimer();
+  clearPumpTimer();
   chunkQueue = [];
+  chunkCursor = 0;
+  chunkDone = 0;
+  chunkRetries = 0;
   setActiveWord(-1);
   isPlaying = false;
   isPaused = false;
   isStarting = false;
   restartAttempts = 0;
+  lastProgressAt = 0;
+  lastEventAt = 0;
   clearStartWatchdog();
   notifyState({ isPlaying: false, isPaused: false, starting: false, currentWordIndex: -1 });
 }
@@ -722,6 +984,11 @@ function speakFromWord(wordIndex = 0) {
   const thisSession = currentSessionId;
 
   cleanupUtterance();
+  clearChunkTimer();
+  clearPumpTimer();
+  chunkRetries = 0;
+  lastEventAt = Date.now();
+  announceNarrationStart();
 
   if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
     window.speechSynthesis.cancel();
@@ -750,7 +1017,7 @@ function speakFromWord(wordIndex = 0) {
   const launchSpeech = () => {
     // A later click during the ~40ms buffer drain discards this launch.
     if (thisSession !== currentSessionId) return;
-    speakCurrentChunk(thisSession);
+    pumpChunks(thisSession);
     startStartWatchdog(thisSession);
   };
 
@@ -778,11 +1045,13 @@ export function play() {
     // The paused utterance may have been dropped by the browser — only trust
     // the API when it really is still holding the speech.
     if (api.paused) {
+      // Taking the reading back means the other tab has to let go.
+      announceNarrationStart();
       api.resume();
+      lastEventAt = Date.now();
       isPaused = false;
       isPlaying = true;
       isStarting = false;
-      playingSince = Date.now();
       notifyState({ isPlaying: true, isPaused: false, starting: false });
       return;
     }
@@ -791,14 +1060,22 @@ export function play() {
   }
 
   if (isPlaying) {
-    isStarting = false;
-    notifyState({ starting: false });
+    const api = window.speechSynthesis;
+    // The engine believes it is reading. If the API agrees, there is
+    // nothing to do; if it does not, the utterance was dropped without an
+    // event — heal it instead of leaving a silent "playing" state that only
+    // a second press can shake off.
+    if (api.speaking || api.pending) {
+      isStarting = false;
+      notifyState({ starting: false });
+      return;
+    }
+    speakFromWord(Math.max(0, currentWordIndex));
     return;
   }
 
   const startIndex = currentWordIndex >= 0 ? currentWordIndex : 0;
   restartAttempts = 0;
-  lastWordIndexAtRestart = startIndex;
   speakFromWord(startIndex);
 }
 
@@ -815,6 +1092,17 @@ export function pause() {
 }
 
 /**
+ * Pauses because another tab started narrating. The place in the document
+ * is kept: the reader can press Play again in this tab to take over.
+ */
+function pauseForOtherTab() {
+  if (!isPlaying || isPaused) return;
+  window.speechSynthesis.pause();
+  isPaused = true;
+  notifyState({ isPlaying: true, isPaused: true, reason: 'other-tab' });
+}
+
+/**
  * Stop audio reading and reset the active word.
  * @param {string} [reason] optional machine-readable reason, surfaced to the UI
  */
@@ -825,7 +1113,12 @@ export function stop(reason = 'user') {
     clearTimeout(speakDebounceTimer);
     speakDebounceTimer = null;
   }
+  clearChunkTimer();
+  clearPumpTimer();
   chunkQueue = [];
+  chunkCursor = 0;
+  chunkDone = 0;
+  chunkRetries = 0;
   cleanupUtterance();
   clearStartWatchdog();
   window.speechSynthesis.cancel();
@@ -866,32 +1159,26 @@ export function isSpeechPaused() {
 }
 
 function cleanupUtterance() {
-  if (keepAliveTimer) {
-    clearInterval(keepAliveTimer);
-    keepAliveTimer = null;
+  for (const utterance of liveUtterances) {
+    utterance.onboundary = null;
+    utterance.onstart = null;
+    utterance.onpause = null;
+    utterance.onresume = null;
+    utterance.onend = null;
+    utterance.onerror = null;
   }
-  if (currentUtterance) {
-    currentUtterance.onboundary = null;
-    currentUtterance.onstart = null;
-    currentUtterance.onpause = null;
-    currentUtterance.onresume = null;
-    currentUtterance.onend = null;
-    currentUtterance.onerror = null;
-    currentUtterance = null;
-  }
+  liveUtterances.clear();
   window.__currentTTSUtterance = null;
 }
 
-function startKeepAlive() {
-  if (keepAliveTimer) clearInterval(keepAliveTimer);
-  keepAliveTimer = setInterval(() => {
-    if (isPlaying && !isPaused && window.speechSynthesis.speaking) {
-      keepAlivePing = true;
-      window.speechSynthesis.pause();
-      window.speechSynthesis.resume();
-      keepAlivePing = false;
-    }
-  }, 10000);
+/**
+ * Silences the engine and makes sure the events of the cancelled utterances
+ * are ignored: a browser that reports onend for work it just threw away
+ * would otherwise count a chunk that still has to be spoken.
+ */
+function cancelEngine() {
+  for (const utterance of liveUtterances) utterance.__canceled = true;
+  window.speechSynthesis.cancel();
 }
 
 /* ==========================================================================
@@ -900,16 +1187,37 @@ function startKeepAlive() {
 
 /**
  * If the engine does not report `onstart` shortly after the request, the
- * user is left staring at a button that looks stuck. Say so instead.
+ * user is left staring at a button that looks stuck. Nudge the chunk once,
+ * then say what happened instead of pretending to read.
  */
 let startWatchdogTimer = null;
 
-function startStartWatchdog(sessionId) {
+function startStartWatchdog(sessionId, attempt = 0) {
   clearStartWatchdog();
   startWatchdogTimer = setTimeout(() => {
     startWatchdogTimer = null;
     if (sessionId !== currentSessionId) return;
     if (isPlaying || isPaused) return;
+
+    // A slow engine may still be preparing the voice (network voices can
+    // take a few seconds on the first sentence) — that is not a failure.
+    const api = window.speechSynthesis;
+    if ((api.speaking || api.pending) && attempt < 5) {
+      startStartWatchdog(sessionId, attempt + 1);
+      return;
+    }
+
+    // One more try before giving up: the very first `speak()` of a session
+    // is the one browsers most often swallow.
+    if (attempt === 0 && chunkDone === 0 && chunkQueue.length > 0) {
+      isStarting = true;
+      notifyState({ starting: true });
+      cancelEngine();
+      chunkCursor = 0;
+      pumpChunks(sessionId);
+      startStartWatchdog(sessionId, 1);
+      return;
+    }
 
     isStarting = false;
     notifyState({
@@ -918,7 +1226,7 @@ function startStartWatchdog(sessionId) {
       starting: false,
       reason: 'no-start'
     });
-  }, 4000);
+  }, 5000);
 }
 
 function clearStartWatchdog() {
@@ -938,7 +1246,7 @@ function clearStartWatchdog() {
  * a speech engine reset, an OS audio route change). Without this the UI would
  * keep claiming it is reading while nothing is audible.
  */
-function reconcileWithSpeechApi() {
+export function reconcileWithSpeechApi() {
   if (!('speechSynthesis' in window)) return;
   const api = window.speechSynthesis;
 
@@ -962,24 +1270,59 @@ function reconcileWithSpeechApi() {
 
   if (!isPlaying) return;
 
-  // Grace period right after start: the API may not report `speaking` yet.
-  if (Date.now() - playingSince < 1500) return;
+  // The engine can be paused behind our back (a tab switch, an audio device
+  // change): a session that looks like it is playing would otherwise stay
+  // silent until the user presses Play again.
+  if (api.paused && !isPaused) {
+    api.resume();
+    lastEventAt = Date.now();
+  }
 
-  if (!api.speaking && !api.pending) {
-    if (currentWordIndex === lastWordIndexAtRestart) {
-      restartAttempts += 1;
-    } else {
-      restartAttempts = 0;
-      lastWordIndexAtRestart = currentWordIndex;
+  // The engine reports activity — the reading is alive, whatever the
+  // boundary events are doing. Some voices never fire them at all.
+  if (api.speaking || api.pending) {
+    // A chunk never lasts longer than the stall threshold, so an engine that
+    // holds the queue without a single event is stuck, not slow. This also
+    // covers a queued request that never starts.
+    if (lastEventAt === 0 || Date.now() - lastEventAt <= STALL_MS) {
+      noteProgress();
+      return;
     }
 
-    if (restartAttempts > 3) {
+    if (restartAttempts >= 4) {
       stop('speech-lost');
       return;
     }
 
+    restartAttempts += 1;
     speakFromWord(Math.max(0, currentWordIndex));
+    return;
   }
+
+  // The engine can still go quiet between two requests even when the queue
+  // is fed; it is only lost when it stays quiet past the grace period.
+  if (Date.now() - lastProgressAt < SILENCE_GRACE_MS) return;
+
+  if (restartAttempts >= 4) {
+    stop('speech-lost');
+    return;
+  }
+
+  restartAttempts += 1;
+
+  // Nothing is left to speak: the last onend was swallowed, so just close
+  // the session instead of starting the final sentence again.
+  if (chunkDone >= chunkQueue.length) {
+    finishPlayback();
+    return;
+  }
+
+  // Text is still queued: wake the engine at the next unspoken chunk
+  // instead of starting a new session, which would cancel the reading and
+  // repeat a sentence.
+  cancelEngine();
+  chunkCursor = chunkDone;
+  pumpChunks(currentSessionId);
 }
 
 let watchdogTimer = null;
@@ -1023,7 +1366,6 @@ export function speakFromElement(element) {
   if (index === undefined) return false;
 
   restartAttempts = 0;
-  lastWordIndexAtRestart = index;
   speakFromWord(index);
   return true;
 }
@@ -1054,7 +1396,19 @@ export function handlePreviewClick(event) {
   const tokenIdx = tokenIndexById.get(wordId);
   if (tokenIdx !== undefined) {
     restartAttempts = 0;
-    lastWordIndexAtRestart = tokenIdx;
     speakFromWord(tokenIdx);
   }
+}
+
+// Two tabs at once would speak over each other; the one that starts reading
+// asks the others to pause. Only the other tabs receive the announcement.
+if (typeof window !== 'undefined') {
+  onOtherTabNarrationStart(pauseForOtherTab);
+
+  // A page that goes away is not reading any more. Without this, a tab that
+  // enters the back/forward cache keeps claiming to play, and the watchdog
+  // would restart it on the way back.
+  window.addEventListener('pagehide', () => {
+    if (isPlaying) stop('pagehide');
+  });
 }

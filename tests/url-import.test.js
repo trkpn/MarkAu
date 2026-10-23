@@ -7,9 +7,8 @@
  */
 import { describe, it, expect } from 'vitest';
 
-const { detectSource, normalizeUrl, decodeBase64Utf8, SOURCE } = await import(
-  '../src/app/url-sources.js'
-);
+const { detectSource, normalizeUrl, decodeBase64Utf8, SOURCE } =
+  await import('../src/app/url-sources.js');
 const { htmlToMarkdown, resolveUrl } = await import('../src/html-to-markdown.js');
 const { buildDocument, isTextual, stripReaderHeader } = await import('../src/app/url-import.js');
 
@@ -79,7 +78,9 @@ describe('knowing the source', () => {
   });
 
   it('sees a YouTube video', () => {
-    expect(detectSource('https://www.youtube.com/watch?v=dQw4w9WgXcQ')?.videoId).toBe('dQw4w9WgXcQ');
+    expect(detectSource('https://www.youtube.com/watch?v=dQw4w9WgXcQ')?.videoId).toBe(
+      'dQw4w9WgXcQ'
+    );
     expect(detectSource('https://youtu.be/dQw4w9WgXcQ')?.videoId).toBe('dQw4w9WgXcQ');
     expect(detectSource('https://www.youtube.com/shorts/abc123')?.videoId).toBe('abc123');
     expect(detectSource('https://www.youtube.com/embed/abc123')?.videoId).toBe('abc123');
@@ -134,7 +135,9 @@ describe('decoding what GitHub sends', () => {
 describe('resolving links', () => {
   it('makes a relative link absolute', () => {
     expect(resolveUrl('/about', 'https://example.com/post/1')).toBe('https://example.com/about');
-    expect(resolveUrl('other', 'https://example.com/post/1')).toBe('https://example.com/post/other');
+    expect(resolveUrl('other', 'https://example.com/post/1')).toBe(
+      'https://example.com/post/other'
+    );
   });
 
   it('leaves an absolute link alone', () => {

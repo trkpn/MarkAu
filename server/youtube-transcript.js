@@ -28,8 +28,7 @@ const ANDROID_CLIENT = {
 };
 
 /** The voice of the app for Android, as it is written in the address. */
-const ANDROID_USER_AGENT =
-  'com.google.android.youtube/20.10.38 (Linux; U; Android 12) gzip';
+const ANDROID_USER_AGENT = 'com.google.android.youtube/20.10.38 (Linux; U; Android 12) gzip';
 
 /** The address of the player. */
 const PLAYER_ENDPOINT = 'https://www.youtube.com/youtubei/v1/player';
@@ -152,7 +151,9 @@ export function chooseTrack(tracks, language = 'en') {
 
   const wanted = String(language || '').toLowerCase();
   const sameLanguage = tracks.filter((track) =>
-    String(track.language || '').toLowerCase().startsWith(wanted)
+    String(track.language || '')
+      .toLowerCase()
+      .startsWith(wanted)
   );
   const pool = sameLanguage.length > 0 ? sameLanguage : tracks;
 

@@ -113,14 +113,15 @@ export function parseVideoDetails(html) {
  */
 export function findCaptionTrack(html, language = 'en') {
   const player = extractJsonAfter(html, 'ytInitialPlayerResponse');
-  const tracks =
-    player?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+  const tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
 
   if (tracks.length === 0) return null;
 
   const wanted = String(language || 'en').toLowerCase();
-  const sameLanguage = tracks.filter(
-    (track) => String(track.languageCode || '').toLowerCase().startsWith(wanted)
+  const sameLanguage = tracks.filter((track) =>
+    String(track.languageCode || '')
+      .toLowerCase()
+      .startsWith(wanted)
   );
   const pool = sameLanguage.length > 0 ? sameLanguage : tracks;
 
@@ -354,8 +355,8 @@ export function collectPlaylistVideos(data) {
 
       // The length is written on the badge over the picture.
       const badge =
-        renderer.contentImage?.thumbnailViewModel?.overlays?.[0]
-          ?.thumbnailBottomOverlayViewModel?.badges?.[0]?.thumbnailBadgeViewModel?.text;
+        renderer.contentImage?.thumbnailViewModel?.overlays?.[0]?.thumbnailBottomOverlayViewModel
+          ?.badges?.[0]?.thumbnailBadgeViewModel?.text;
 
       add(renderer.contentId, title, badge ? timeToSeconds(badge) : 0);
     }
@@ -380,7 +381,10 @@ export function collectPlaylistVideos(data) {
  * @param {string} [options.transcriptNote] why there is no transcript
  * @returns {string}
  */
-export function buildVideoDocument(details, { videoUrl = '', transcript = '', transcriptNote = '' } = {}) {
+export function buildVideoDocument(
+  details,
+  { videoUrl = '', transcript = '', transcriptNote = '' } = {}
+) {
   const lines = [];
 
   lines.push(`# ${details.title}`);
@@ -411,9 +415,7 @@ export function buildVideoDocument(details, { videoUrl = '', transcript = '', tr
     lines.push('## Chapters');
     lines.push('');
     for (const chapter of chapters) {
-      const link = videoUrl
-        ? `[${chapter.time}](${videoUrl}&t=${chapter.seconds})`
-        : chapter.time;
+      const link = videoUrl ? `[${chapter.time}](${videoUrl}&t=${chapter.seconds})` : chapter.time;
       lines.push(`- ${link} — ${chapter.title}`);
     }
     lines.push('');

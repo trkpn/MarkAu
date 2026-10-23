@@ -6,13 +6,8 @@
  */
 import { describe, it, expect } from 'vitest';
 
-const {
-  assertVideoId,
-  chooseTrack,
-  fetchTranscript,
-  handleTranscriptRequest,
-  TranscriptError
-} = await import('../server/youtube-transcript.js');
+const { assertVideoId, chooseTrack, fetchTranscript, handleTranscriptRequest, TranscriptError } =
+  await import('../server/youtube-transcript.js');
 const { parseCaptionTrack } = await import('../src/youtube-to-markdown.js');
 
 /**
@@ -140,9 +135,7 @@ describe('fetching the transcript', () => {
         headers: { 'content-type': 'application/json' }
       });
 
-    await expect(fetchTranscript('dQw4w9WgXcQ', { fetchImpl })).rejects.toThrow(
-      /no captions/
-    );
+    await expect(fetchTranscript('dQw4w9WgXcQ', { fetchImpl })).rejects.toThrow(/no captions/);
   });
 
   it('answers with the lines of the transcript', async () => {

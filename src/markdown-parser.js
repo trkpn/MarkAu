@@ -498,7 +498,9 @@ md.renderer.rules.fence = (tokens, idx, options, env, self) => {
 
   return (
     `<figure class="mermaid-block" data-mermaid="true"${self.renderAttrs(token)}>` +
-    (caption ? `<figcaption class="mermaid-caption">${md.utils.escapeHtml(caption)}</figcaption>` : '') +
+    (caption
+      ? `<figcaption class="mermaid-caption">${md.utils.escapeHtml(caption)}</figcaption>`
+      : '') +
     `<div class="mermaid-viewport"><div class="mermaid-canvas"></div></div>` +
     `<pre class="mermaid-source" hidden><code class="language-mermaid">${md.utils.escapeHtml(source)}</code></pre>` +
     `</figure>`

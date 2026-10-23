@@ -56,10 +56,7 @@ describe('answering the browser', () => {
 
   it('refuses a request from another site', async () => {
     const response = await handleTranslateRequest(
-      makeRequest(
-        { target: 'th', units: ['Hello'] },
-        { origin: 'https://somewhere.example' }
-      )
+      makeRequest({ target: 'th', units: ['Hello'] }, { origin: 'https://somewhere.example' })
     );
 
     expect(response.status).toBe(403);
@@ -69,10 +66,7 @@ describe('answering the browser', () => {
     // The port has to be part of the address: a request that comes from
     // the app on port 5173 is not a request from some other place.
     const response = await handleTranslateRequest(
-      makeRequest(
-        { target: 'th', units: ['Hello'] },
-        { origin: 'https://markau.pages.dev' }
-      ),
+      makeRequest({ target: 'th', units: ['Hello'] }, { origin: 'https://markau.pages.dev' }),
       { fetchImpl: fakeTranslator({ text: 'สวัสดี' }) }
     );
 
@@ -134,10 +128,11 @@ describe('answering the browser', () => {
 
   it('answers with another status when the translator fails in another way', async () => {
     const response = await handleTranslateRequest(makeRequest({ target: 'th', units: ['Hello'] }), {
-      fetchImpl: async () => new Response('<html>Error</html>', {
-        status: 400,
-        headers: { 'content-type': 'text/html' }
-      })
+      fetchImpl: async () =>
+        new Response('<html>Error</html>', {
+          status: 400,
+          headers: { 'content-type': 'text/html' }
+        })
     });
 
     expect(response.status).toBe(502);

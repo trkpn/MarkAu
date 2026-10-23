@@ -10,6 +10,7 @@
  *   settings-manager.js  — persisted preferences (single source of truth)
  *   markdown-parser.js    — Markdown → sanitized HTML
  *   tts-engine.js         — speech synthesis + word highlighting
+ *   multi-tab.js          — one tab narrates at a time
  *   stt-engine.js         — speech recognition (dictation)
  *   app/dom.js            — element registry + icon injection
  *   app/status.js         — footer status manager
@@ -20,6 +21,9 @@
  *   app/paste.js          — clipboard paste
  *   app/url-import.js     — import a document from a web address
  *   app/translate.js      — translate the document into another language
+ *   app/history.js        — the versions of the document, kept in the browser
+ *   app/new-tab.js        — a second tab, with a copy of the document
+ *   app/document-title.js — the document's name in the browser tab
  *   app/settings-modal.js — preferences
  *   app/dialog.js         — in-app confirmation dialog
  * ============================================================================
@@ -30,19 +34,30 @@ import { injectIcons, el } from './app/dom.js';
 import { initStatus, setMessage } from './app/status.js';
 import { initLayout } from './app/layout.js';
 import { initToolbar, refreshToolbarDensity } from './app/toolbar.js';
-import { initEditor, setMarkdown, loadDraft, onContentChange } from './app/editor.js';
-import { initPreview } from './app/preview.js';
+import {
+  initEditor,
+  setMarkdown,
+  loadDraft,
+  hasTabDraft,
+  startBlankTab,
+  onContentChange
+} from './app/editor.js';
+import { initPreview, forgetTabPosition } from './app/preview.js';
 import { initControls } from './app/controls.js';
 import { initPaste } from './app/paste.js';
 import { initUrlImport } from './app/url-import.js';
 import { initTranslate } from './app/translate.js';
+import { initHistory } from './app/history.js';
 import { initDragDrop } from './app/drag-drop.js';
 import { initShortcuts } from './app/shortcuts.js';
+import { initNewTab } from './app/new-tab.js';
+import { initDocumentTitle } from './app/document-title.js';
 import { initMiniPlayer } from './app/mini-player.js';
 import { initOutline, rebuildOutline } from './app/outline.js';
 import { initSettingsModal } from './app/settings-modal.js';
 import { confirmDialog } from './app/dialog.js';
 import { defaultMarkdown } from './sample-markdown.js';
+import { isAnotherTabOpen } from './multi-tab.js';
 
 /* ==========================================================================
  * Document level actions
@@ -88,11 +103,20 @@ async function clearDocument() {
  * Bootstrap
  * ========================================================================== */
 
-function initApp() {
+async function initApp() {
   // The app restores the reading position itself; the browser's automatic
   // scroll restoration would fight it and win.
   if ('scrollRestoration' in window.history) {
     window.history.scrollRestoration = 'manual';
+  }
+  // A tab opened by hand must not inherit the article of another tab. The
+  // app URL resumes the last document only when this is the only tab; the
+  // New tab button asks for an empty one explicitly.
+  const url = new URL(window.location.href);
+  const wantsNewTab = url.searchParams.has('new');
+  if (wantsNewTab) {
+    url.searchParams.delete('new');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   }
 
   // 1. Preferences first — they drive the CSS variables and the layout
@@ -102,9 +126,20 @@ function initApp() {
   initToolbar();
 
   // 2. Workspace
+  const startFresh = wantsNewTab || (!hasTabDraft() && (await isAnotherTabOpen()));
+  if (startFresh) {
+    startBlankTab();
+    forgetTabPosition();
+  }
+
+  // An empty draft of this tab is a real answer - the document was cleared
+  // on purpose - so only a tab with no draft at all starts from the sample.
+  const draft = startFresh ? '' : loadDraft();
+  const hasDraft = startFresh || hasTabDraft();
+
   initLayout();
   initEditor({
-    initialContent: loadDraft() || defaultMarkdown,
+    initialContent: hasDraft ? draft : draft || defaultMarkdown,
     onSample: loadSampleDocument,
     onCopy: copyMarkdown,
     onClear: clearDocument
@@ -116,8 +151,11 @@ function initApp() {
   initPaste();
   initUrlImport();
   initTranslate();
+  initHistory();
   initDragDrop();
   initShortcuts();
+  initNewTab();
+  initDocumentTitle();
   initMiniPlayer();
   initOutline();
   initSettingsModal();

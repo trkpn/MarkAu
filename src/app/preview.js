@@ -16,10 +16,11 @@
 
 import { el } from './dom.js';
 import { renderMarkdown } from '../markdown-parser.js';
+import { detectLanguage } from '../language-detect.js';
 import { renderMermaidDiagrams, handleDiagramAction } from '../mermaid-renderer.js';
 import {
-  detectLanguage,
   ensureTokens,
+  setDocumentLocale,
   markTokensStale,
   setScrollContainer,
   setPreviewContainer,
@@ -135,7 +136,9 @@ function renderNow(reason) {
     el.preview.dispatchEvent(new CustomEvent('preview:rendered'));
   }
 
-  setSTTLocale(detectLanguage(markdownText));
+  const locale = detectLanguage(markdownText);
+  setSTTLocale(locale);
+  setDocumentLocale(locale);
 
   scheduleTokenize();
 }
@@ -413,16 +416,40 @@ let positionTimer = null;
 let positionRestored = false;
 
 /**
- * Moves the reading position over from the key it had before the rename.
+ * Reads the reading position of this tab, falling back to the position the
+ * app kept before positions were per tab.
+ * @returns {string|null}
+ */
+function readPosition() {
+  try {
+    const own = sessionStorage.getItem(POSITION_KEY);
+    if (own !== null) return own;
+  } catch {
+    /* storage unavailable */
+  }
+
+  try {
+    return localStorage.getItem(POSITION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Moves the reading position into this tab's storage, from either the shared
+ * key or the key it had before the rename.
  */
 function adoptLegacyPosition() {
   try {
-    if (localStorage.getItem(POSITION_KEY)) return;
+    if (sessionStorage.getItem(POSITION_KEY) !== null) return;
 
+    const shared = localStorage.getItem(POSITION_KEY);
     const legacy = localStorage.getItem(LEGACY_POSITION_KEY);
-    if (!legacy) return;
+    const value = shared || legacy;
+    if (!value) return;
 
-    localStorage.setItem(POSITION_KEY, legacy);
+    sessionStorage.setItem(POSITION_KEY, value);
+    localStorage.removeItem(POSITION_KEY);
     localStorage.removeItem(LEGACY_POSITION_KEY);
   } catch {
     /* storage unavailable */
@@ -430,14 +457,15 @@ function adoptLegacyPosition() {
 }
 
 /**
- * Stores the current reading position.
+ * Stores the current reading position for this tab only: two tabs can show
+ * two different documents, and neither should drag the other's view.
  */
 function savePosition() {
   if (!getSettings().rememberPosition) return;
   const max = el.previewWrapper.scrollHeight - el.previewWrapper.clientHeight;
   if (max <= 0) return;
   try {
-    localStorage.setItem(POSITION_KEY, (el.previewWrapper.scrollTop / max).toFixed(4));
+    sessionStorage.setItem(POSITION_KEY, (el.previewWrapper.scrollTop / max).toFixed(4));
   } catch {
     /* storage unavailable */
   }
@@ -456,7 +484,7 @@ function restorePosition() {
 
   let ratio = 0;
   try {
-    ratio = Number.parseFloat(localStorage.getItem(POSITION_KEY) || '0');
+    ratio = Number.parseFloat(readPosition() || '0');
   } catch {
     ratio = 0;
   }
@@ -478,6 +506,35 @@ function schedulePositionSave() {
     positionTimer = null;
     savePosition();
   }, 400);
+}
+
+/**
+ * Saves the position right away. The tab can be hidden or closed before the
+ * debounce has run, and the reader would then come back to the wrong place.
+ */
+function flushPosition() {
+  if (positionTimer) {
+    clearTimeout(positionTimer);
+    positionTimer = null;
+  }
+  savePosition();
+}
+
+/**
+ * Forgets the reading position of this tab. A tab that opens empty must not
+ * jump to the place another article was left at.
+ */
+export function forgetTabPosition() {
+  if (positionTimer) {
+    clearTimeout(positionTimer);
+    positionTimer = null;
+  }
+  positionRestored = false;
+  try {
+    sessionStorage.removeItem(POSITION_KEY);
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 /* ==========================================================================
@@ -520,9 +577,7 @@ function handleLinkClick(linkEl) {
 
   // A link to a place inside the document — a heading, a footnote.
   if (href.startsWith('#')) {
-    const target = el.preview.querySelector(
-      `#${CSS.escape(decodeURIComponent(href.slice(1)))}`
-    );
+    const target = el.preview.querySelector(`#${CSS.escape(decodeURIComponent(href.slice(1)))}`);
     if (!target) return;
     target.scrollIntoView({ behavior: getSettings().smoothScrollActive ? 'smooth' : 'auto' });
     return;
@@ -586,6 +641,13 @@ export function initPreview() {
   });
 
   initSyncScroll();
+
+  // Keep the last position even if the tab is closed or hidden before the
+  // debounce has run.
+  window.addEventListener('pagehide', flushPosition);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPosition();
+  });
 
   // A diagram that finished drawing adds words to the document — the word
   // count and the narration have to learn them.

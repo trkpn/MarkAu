@@ -107,8 +107,7 @@ self.addEventListener('activate', (event) => {
           keys.map((key) => {
             // The cache of the old name is purged as well, so the rename
             // does not leave a copy of the app behind.
-            const isOutdated =
-              key.startsWith('markau-') || key.startsWith('markaudio-');
+            const isOutdated = key.startsWith('markau-') || key.startsWith('markaudio-');
             if (key !== CACHE_NAME && isOutdated) {
               console.log('[SW] Purging outdated cache:', key);
               return caches.delete(key);

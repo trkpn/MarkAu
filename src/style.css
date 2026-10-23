@@ -1809,6 +1809,91 @@
     margin-top: 0.25rem;
   }
 
+  /* --------------------------------------------------- version history --
+     The versions of the document. The list is the long part of the
+     dialog, so it scrolls on its own and the buttons below it stay
+     where they are. */
+  .history-stats {
+    font-size: 0.74rem;
+    color: var(--ma-fg-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .history-empty {
+    padding: 0.85rem 1rem;
+    background: var(--ma-bg-2);
+    border: 1px solid var(--ma-border);
+    border-radius: 8px;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--ma-fg-2);
+  }
+
+  .history-empty[hidden] {
+    display: none;
+  }
+
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: min(48vh, 420px);
+    overflow-y: auto;
+    padding-right: 0.15rem;
+  }
+
+  .history-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.7rem 0.85rem;
+    background: var(--ma-bg-2);
+    border: 1px solid var(--ma-border);
+    border-radius: 8px;
+  }
+
+  .history-entry-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+  }
+
+  .history-entry-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--ma-fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .history-entry-meta {
+    font-size: 0.72rem;
+    color: var(--ma-fg-2);
+  }
+
+  .history-entry-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .history-preview {
+    max-height: 220px;
+    overflow: auto;
+    padding: 0.6rem 0.7rem;
+    background: var(--ma-bg);
+    border: 1px solid var(--ma-border);
+    border-radius: 6px;
+    font-family: var(--ma-font-editor);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--ma-fg-2);
+  }
+
   /* ------------------------------------------------------ drag & drop --
      The panel that appears while something is held over the app. It says
      what will happen, so nothing is dropped by surprise. */
@@ -2065,11 +2150,19 @@
     display: none;
   }
 
+  .app-header[data-hide-history='true'] #btn-history {
+    display: none;
+  }
+
   .app-header[data-hide-translate='true'] #btn-translate {
     display: none;
   }
 
   .app-header[data-hide-reset='true'] #btn-reset {
+    display: none;
+  }
+
+  .app-header[data-hide-new-tab='true'] #btn-new-tab {
     display: none;
   }
 

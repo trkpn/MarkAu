@@ -54,7 +54,8 @@ describe('sanitizeSettings', () => {
     expect(sanitizeSettings({}).translateTarget).toBe(DEFAULT_SETTINGS.translateTarget);
   });
 
-  it('falls back to the default for unknown enum values', () => {    const result = sanitizeSettings({
+  it('falls back to the default for unknown enum values', () => {
+    const result = sanitizeSettings({
       theme: 'neon',
       syncMode: 'sideways',
       speechChunk: 'shout',
@@ -75,6 +76,16 @@ describe('sanitizeSettings', () => {
     expect(sanitizeSettings({ splitRatioRow: 5 }).splitRatioRow).toBe(SPLIT_RATIO_MAX);
     expect(sanitizeSettings({ splitRatioColumn: -2 }).splitRatioColumn).toBe(SPLIT_RATIO_MIN);
     expect(sanitizeSettings({ splitRatioRow: 0.42 }).splitRatioRow).toBe(0.42);
+  });
+
+  it('takes the version history settings only from the offered values', () => {
+    expect(sanitizeSettings({ historyEnabled: false }).historyEnabled).toBe(false);
+    expect(sanitizeSettings({ historyLimit: 50 }).historyLimit).toBe(50);
+    expect(sanitizeSettings({ historyDelaySeconds: 30 }).historyDelaySeconds).toBe(30);
+
+    const result = sanitizeSettings({ historyLimit: 999, historyDelaySeconds: 7 });
+    expect(result.historyLimit).toBe(DEFAULT_SETTINGS.historyLimit);
+    expect(result.historyDelaySeconds).toBe(DEFAULT_SETTINGS.historyDelaySeconds);
   });
 
   it('falls back for a non numeric ratio', () => {

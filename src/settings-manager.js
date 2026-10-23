@@ -19,7 +19,7 @@ const SETTINGS_STORAGE_KEY = 'markau_settings_v1';
  */
 const LEGACY_SETTINGS_KEY = 'markaudio_settings_v1';
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 /** Legacy standalone keys that are folded into the settings payload on load. */
 const LEGACY_KEYS = {
@@ -125,6 +125,25 @@ export const LINE_HEIGHT_OPTIONS = [
 /** Panel arrangement: side by side or stacked. */
 export const SPLIT_AXES = ['row', 'column'];
 
+/**
+ * How many versions of the document are kept. The oldest ones go first
+ * when there are more of them.
+ */
+export const HISTORY_LIMIT_OPTIONS = [
+  { value: 10, label: '10 versions' },
+  { value: 30, label: '30 versions' },
+  { value: 50, label: '50 versions' },
+  { value: 100, label: '100 versions' }
+];
+
+/** How long the typing has to be quiet before a version is kept. */
+export const HISTORY_DELAY_OPTIONS = [
+  { value: 3, label: 'After 3s' },
+  { value: 5, label: 'After 5s' },
+  { value: 10, label: 'After 10s' },
+  { value: 30, label: 'After 30s' }
+];
+
 const values = (options) => options.map((option) => option.value);
 
 export const THEME_MODES = values(THEME_OPTIONS);
@@ -133,6 +152,8 @@ export const SPEECH_CHUNK_MODES = values(SPEECH_CHUNK_OPTIONS);
 export const HIGHLIGHT_MODES = values(HIGHLIGHT_MODE_OPTIONS);
 export const AUTO_SAVE_SECONDS = values(AUTO_SAVE_OPTIONS);
 export const SAVE_FORMATS = values(SAVE_FORMAT_OPTIONS);
+export const HISTORY_LIMITS = values(HISTORY_LIMIT_OPTIONS);
+export const HISTORY_DELAYS = values(HISTORY_DELAY_OPTIONS);
 
 /** Minimum / maximum share of the workspace a single pane may occupy. */
 export const SPLIT_RATIO_MIN = 0.15;
@@ -176,6 +197,10 @@ export const DEFAULT_SETTINGS = {
   readerApiKey: '',
   // Translation: the language the document was last translated into.
   translateTarget: 'th',
+  // Version history: the versions of the document, kept in this browser.
+  historyEnabled: true,
+  historyLimit: 100,
+  historyDelaySeconds: 10,
   // Workspace
   view: 'split',
   theme: 'dark',
@@ -257,6 +282,15 @@ export function sanitizeSettings(raw) {
       typeof source.translateTarget === 'string' && source.translateTarget.trim()
         ? source.translateTarget.trim()
         : d.translateTarget,
+    // Version history — the versions live in the browser, and how many of
+    // them there are is the user's choice.
+    historyEnabled: bool(source.historyEnabled, d.historyEnabled),
+    historyLimit: oneOf(Number(source.historyLimit), HISTORY_LIMITS, d.historyLimit),
+    historyDelaySeconds: oneOf(
+      Number(source.historyDelaySeconds),
+      HISTORY_DELAYS,
+      d.historyDelaySeconds
+    ),
     view: oneOf(source.view, VIEW_MODES, d.view),
     theme: oneOf(source.theme, THEME_MODES, d.theme),
     // A legacy "auto" value resolves to the arrangement that matches the
@@ -334,19 +368,28 @@ function adoptLegacySettings() {
 }
 
 /**
+ * Reads the settings payload as it is on disk right now.
+ *
+ * Reading the stored copy again before a write is what keeps two tabs from
+ * undoing each other: the tab that writes last merges its own change into
+ * the settings the other tab just saved.
+ *
+ * @param {string|null} [raw] payload provided by a `storage` event
+ * @returns {typeof DEFAULT_SETTINGS}
+ */
+function readStoredSettings(raw = undefined) {
+  const payload = raw === undefined ? localStorage.getItem(SETTINGS_STORAGE_KEY) : raw;
+  if (!payload) return sanitizeSettings(migrate({}));
+  return sanitizeSettings(migrate(JSON.parse(payload)));
+}
+
+/**
  * Loads settings from localStorage, migrates and sanitizes them.
  */
 export function loadSettings() {
   try {
     adoptLegacySettings();
-
-    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      currentSettings = sanitizeSettings(migrate(parsed));
-    } else {
-      currentSettings = sanitizeSettings(migrate({}));
-    }
+    currentSettings = readStoredSettings();
   } catch (err) {
     console.warn('Failed to load settings from localStorage, using defaults:', err);
     currentSettings = { ...DEFAULT_SETTINGS };
@@ -360,7 +403,13 @@ export function loadSettings() {
  * @param {Partial<typeof DEFAULT_SETTINGS>} updates
  */
 export function saveSettings(updates) {
-  currentSettings = sanitizeSettings({ ...currentSettings, ...updates });
+  let base = currentSettings;
+  try {
+    base = readStoredSettings();
+  } catch {
+    /* the stored copy is unreadable - keep what this tab has */
+  }
+  currentSettings = sanitizeSettings({ ...base, ...updates });
   try {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(currentSettings));
   } catch (err) {
@@ -427,6 +476,11 @@ export function clearDraft() {
   } catch {
     /* ignore */
   }
+  try {
+    sessionStorage.removeItem('markdown_draft_tab');
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -447,5 +501,24 @@ function notifyListeners() {
     } catch (e) {
       console.error('Settings listener error:', e);
     }
+  });
+}
+
+/**
+ * Keeps the open tabs in step: a preference changed in one tab is applied to
+ * the others as soon as the browser reports the new payload. The event only
+ * fires in the *other* tabs, so there is no echo.
+ */
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== SETTINGS_STORAGE_KEY) return;
+    try {
+      currentSettings = readStoredSettings(event.newValue);
+    } catch (err) {
+      console.warn('Failed to sync settings from another tab:', err);
+      return;
+    }
+    applySettings(currentSettings);
+    notifyListeners();
   });
 }

@@ -175,7 +175,8 @@ function showUnavailable(block) {
 
   const note = document.createElement('p');
   note.className = 'mermaid-error';
-  note.textContent = 'The diagram renderer is not available offline yet — the source is shown below.';
+  note.textContent =
+    'The diagram renderer is not available offline yet — the source is shown below.';
   canvas.replaceChildren(note);
 }
 

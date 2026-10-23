@@ -169,10 +169,10 @@ describe('asking the translator', () => {
           });
         }
 
-        return new Response(
-          JSON.stringify({ sentences: [{ trans: 'สวัสดี' }], src: 'en' }),
-          { status: 200, headers: { 'content-type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({ sentences: [{ trans: 'สวัสดี' }], src: 'en' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
       }
     });
 
@@ -185,10 +185,10 @@ describe('asking the translator', () => {
 
     const fetchImpl = async (url) => {
       asked.push(new URL(url).searchParams.get('client'));
-      return new Response(
-        JSON.stringify({ sentences: [{ trans: 'สวัสดี' }], src: 'en' }),
-        { status: 200, headers: { 'content-type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ sentences: [{ trans: 'สวัสดี' }], src: 'en' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
     };
 
     await translateText('One', 'th', { fetchImpl });

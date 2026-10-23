@@ -23,6 +23,8 @@ import { setView } from './layout.js';
 import { pasteFromClipboard } from './paste.js';
 import { openDialog as openUrlImportDialog } from './url-import.js';
 import { openDialog as openTranslateDialog } from './translate.js';
+import { openDialog as openHistoryDialog, captureNow } from './history.js';
+import { openNewTab } from './new-tab.js';
 import { toggleNarration } from './narration.js';
 import { setMessage } from './status.js';
 
@@ -63,12 +65,28 @@ function ownsSpace(target) {
 }
 
 /**
+ * Saves the draft and keeps a version of the document — what Ctrl+S means
+ * here. A version is kept whatever the size of the change: the user asked
+ * for this one.
+ */
+function saveDocument() {
+  flushDraft();
+
+  const kept = captureNow();
+  setMessage(kept.added ? '💾 Draft saved — version kept' : '💾 Draft saved', {
+    tone: 'accent',
+    ttl: 1800
+  });
+}
+
+/**
  * @returns {boolean} whether a modal surface is currently open
  */
 function isModalOpen() {
   if (el.modalSettings && !el.modalSettings.hasAttribute('hidden')) return true;
   if (el.modalUrlImport && !el.modalUrlImport.hasAttribute('hidden')) return true;
   if (el.modalTranslate && !el.modalTranslate.hasAttribute('hidden')) return true;
+  if (el.modalHistory && !el.modalHistory.hasAttribute('hidden')) return true;
   return Boolean(document.querySelector('dialog[open]'));
 }
 
@@ -89,6 +107,7 @@ function onKeyDown(event) {
     if (el.modalSettings && !el.modalSettings.hasAttribute('hidden')) return; // handled by the modal
     if (el.modalUrlImport && !el.modalUrlImport.hasAttribute('hidden')) return; // handled by the modal
     if (el.modalTranslate && !el.modalTranslate.hasAttribute('hidden')) return; // handled by the modal
+    if (el.modalHistory && !el.modalHistory.hasAttribute('hidden')) return; // handled by the modal
     if (isSpeaking()) {
       event.preventDefault();
       stop('user');
@@ -118,16 +137,42 @@ function onKeyDown(event) {
 
     if (key === 's') {
       event.preventDefault();
-      flushDraft();
-      setMessage('💾 Draft saved', { tone: 'accent', ttl: 1500 });
+      saveDocument();
       return;
     }
   }
 
+  /* -------------------------------------------------------------- save --
+   * The browser's own Ctrl+S saves the page; here it saves the document,
+   * wherever the focus is — unless a field, a dialog or a shortcut with
+   * more keys owns the combination.
+   */
+  if (
+    mod &&
+    !event.shiftKey &&
+    !event.altKey &&
+    !inField &&
+    !isModalOpen() &&
+    event.key.toLowerCase() === 's'
+  ) {
+    event.preventDefault();
+    saveDocument();
+    return;
+  }
+
+  /* ------------------------------------------------------------ new tab --
+   * Ctrl+Alt+N / Cmd+Option+N opens the next article in a tab of its own.
+   * Ctrl+Shift+N is not used, because the browser takes it for incognito.
+   */
+  if (mod && event.altKey && !event.shiftKey && !isModalOpen() && event.key.toLowerCase() === 'n') {
+    event.preventDefault();
+    openNewTab();
+    return;
+  }
   /* ------------------------------------------------------------- paste --
    * The browser's own paste only reaches a text field, so outside the editor
-   * the app offers its own: it drops the clipboard into the document
-   * without a trip through the view switcher.
+   * the app offers its own: it makes the clipboard the document, without a
+   * trip through the view switcher.
    */
   if (
     mod &&
@@ -177,6 +222,24 @@ function onKeyDown(event) {
   ) {
     event.preventDefault();
     openTranslateDialog();
+    return;
+  }
+
+  /* --------------------------------------------------------- history --
+     The same shape again: a command that shows something, reachable from
+     anywhere outside the editor.
+     */
+  if (
+    mod &&
+    event.shiftKey &&
+    !event.altKey &&
+    !inEditor &&
+    !inField &&
+    !isModalOpen() &&
+    event.key.toLowerCase() === 'h'
+  ) {
+    event.preventDefault();
+    openHistoryDialog();
     return;
   }
 

@@ -181,7 +181,12 @@ describe('a table', () => {
   it('translates its cells and keeps its columns', () => {
     const plan = buildPlan('| Head one | Head two |\n| --- | --- |\n| Value A | Value B |');
 
-    expect(plan.units.map((unit) => unit.text)).toEqual(['Head one', 'Head two', 'Value A', 'Value B']);
+    expect(plan.units.map((unit) => unit.text)).toEqual([
+      'Head one',
+      'Head two',
+      'Value A',
+      'Value B'
+    ]);
   });
 
   it('puts the row back together', () => {
@@ -272,9 +277,7 @@ describe('the document as a whole', () => {
     const plan = buildPlan('First line\r\nSecond line');
 
     expect(plan.eol).toBe('\r\n');
-    expect(normalizeEol('First line\nSecond line', plan.eol)).toBe(
-      'First line\r\nSecond line'
-    );
+    expect(normalizeEol('First line\nSecond line', plan.eol)).toBe('First line\r\nSecond line');
   });
 
   it('has a separator that is not a token', () => {
@@ -338,10 +341,7 @@ describe('the document as a whole', () => {
   it('keeps a horizontal rule out of the translator', () => {
     const plan = buildPlan('A paragraph.\n\n---\n\nAnother paragraph.');
 
-    expect(plan.units.map((unit) => unit.text)).toEqual([
-      'A paragraph.',
-      'Another paragraph.'
-    ]);
+    expect(plan.units.map((unit) => unit.text)).toEqual(['A paragraph.', 'Another paragraph.']);
   });
 });
 

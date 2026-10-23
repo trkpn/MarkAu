@@ -41,8 +41,8 @@ export function parseRedditJson(payload, pageUrl = '') {
   const post = findPost(listings);
   if (!post) return null;
 
-  const commentListing = listings.find(
-    (listing) => listing?.data?.children?.some((child) => child.kind === 't1')
+  const commentListing = listings.find((listing) =>
+    listing?.data?.children?.some((child) => child.kind === 't1')
   );
 
   const comments = (commentListing?.data?.children || [])
@@ -165,7 +165,8 @@ export function buildRedditDocument(thread, bodyMarkdown = '', comments = []) {
   if (thread.subreddit) facts.push(`**Subreddit:** r/${thread.subreddit}`);
   if (thread.author) facts.push(`**By:** u/${thread.author}`);
   if (thread.score) facts.push(`**Score:** ${thread.score}`);
-  if (thread.created) facts.push(`**Posted:** ${new Date(thread.created * 1000).toISOString().slice(0, 10)}`);
+  if (thread.created)
+    facts.push(`**Posted:** ${new Date(thread.created * 1000).toISOString().slice(0, 10)}`);
   if (thread.url) facts.push(`**Link:** ${thread.url}`);
 
   if (facts.length > 0) {

@@ -64,9 +64,7 @@ describe('checking an address before it is fetched', () => {
   });
 
   it('refuses an address that points inside the network', () => {
-    expect(() => assertAllowedUrl('http://169.254.169.254/latest/meta-data')).toThrow(
-      ProxyError
-    );
+    expect(() => assertAllowedUrl('http://169.254.169.254/latest/meta-data')).toThrow(ProxyError);
   });
 });
 
@@ -77,7 +75,10 @@ describe('following redirects', () => {
     const fetchImpl = async (url) => {
       calls.push(url);
       if (calls.length === 1) {
-        return new Response(null, { status: 302, headers: { location: 'http://127.0.0.1/secret' } });
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'http://127.0.0.1/secret' }
+        });
       }
       return new Response('the page', { status: 200 });
     };
@@ -116,7 +117,9 @@ describe('following redirects', () => {
 
 describe('answering the browser', () => {
   it('answers with a JSON envelope', async () => {
-    const request = new Request('https://markau.pages.dev/api/fetch?url=https%3A%2F%2Fexample.com%2F');
+    const request = new Request(
+      'https://markau.pages.dev/api/fetch?url=https%3A%2F%2Fexample.com%2F'
+    );
 
     const response = await handleProxyRequest(request, {
       fetchImpl: async () => new Response('the page', { status: 200 })
@@ -128,9 +131,12 @@ describe('answering the browser', () => {
   });
 
   it('refuses a request from another site', async () => {
-    const request = new Request('https://markau.pages.dev/api/fetch?url=https%3A%2F%2Fexample.com%2F', {
-      headers: { origin: 'https://somewhere.example' }
-    });
+    const request = new Request(
+      'https://markau.pages.dev/api/fetch?url=https%3A%2F%2Fexample.com%2F',
+      {
+        headers: { origin: 'https://somewhere.example' }
+      }
+    );
 
     const response = await handleProxyRequest(request, {
       fetchImpl: async () => new Response('the page', { status: 200 })

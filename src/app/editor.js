@@ -18,11 +18,21 @@ import { setMessage } from './status.js';
 import { renderMarkdown } from '../markdown-parser.js';
 
 const DRAFT_KEY = 'markdown_draft';
+/**
+ * The draft of *this tab*. Several tabs are open at once - the reader pastes
+ * a different document into each - so each tab keeps its own copy; the shared
+ * key above is only the recovery copy that a tab without a copy of its own
+ * can start from.
+ */
+const TAB_DRAFT_KEY = 'markdown_draft_tab';
+/** Set when the tab was opened deliberately empty (the New tab button). */
+const NEW_TAB_KEY = 'markdown_new_tab';
 const WORDS_PER_MINUTE = 180;
 
 const contentListeners = new Set();
 
 let draftTimer = null;
+let lifecycleBound = false;
 let cachedLineCount = 0;
 let pendingMutationReason = null;
 
@@ -72,8 +82,8 @@ function updateStats() {
   const trimmed = text.trim();
   const wordCount = trimmed ? trimmed.split(/\s+/).length : 0;
 
-    el.docStats.textContent = `Lines: ${lineCount} · Chars: ${charCount}`;
-    el.readingTime.textContent = `~${Math.max(1, Math.ceil(wordCount / WORDS_PER_MINUTE))} min read`;
+  el.docStats.textContent = `Lines: ${lineCount} · Chars: ${charCount}`;
+  el.readingTime.textContent = `~${Math.max(1, Math.ceil(wordCount / WORDS_PER_MINUTE))} min read`;
 }
 
 /* ==========================================================================
@@ -100,30 +110,88 @@ function scheduleDraftSave() {
 }
 
 /**
- * Writes the draft to localStorage right away.
+ * Writes the draft right away.
+ *
+ * Two copies are written: this tab's own draft in `sessionStorage`, and the
+ * shared recovery copy in `localStorage`. A second tab cannot overwrite the
+ * first tab's document (its copy is its own), while a tab that has no copy
+ * of its own can still start from the last document.
+ *
+ * An empty document never erases the recovery copy: the copy may belong to
+ * another tab, and a blank tab that is closed right away must not take the
+ * last article with it.
+ *
  * @returns {boolean} whether the write succeeded
  */
 function writeDraft() {
+  if (!el.editor) return false;
+  const value = el.editor.value;
+  let tabSaved = false;
+
   try {
-    const value = el.editor.value;
-    if (value) {
-      localStorage.setItem(DRAFT_KEY, value);
-    } else {
-      localStorage.removeItem(DRAFT_KEY);
-    }
+    // Even an empty document is a draft of its own: reloading after a Clear
+    // must stay empty instead of bringing the recovery copy back.
+    sessionStorage.setItem(TAB_DRAFT_KEY, value);
+    tabSaved = true;
+  } catch {
+    /* session storage unavailable - the recovery copy is all there is */
+  }
+
+  try {
+    if (value) localStorage.setItem(DRAFT_KEY, value);
     return true;
   } catch (err) {
+    if (tabSaved) {
+      console.warn('Draft recovery copy could not be written:', err);
+      return true;
+    }
     console.error('Failed to persist draft:', err);
-    setMessage('Draft could not be saved — browser storage is full', { tone: 'warn', ttl: 5000 });
+    setMessage('Draft could not be saved - browser storage is full', { tone: 'warn', ttl: 5000 });
     return false;
   }
 }
 
 /**
- * Reads the persisted draft.
+ * Starts a deliberately empty tab: the next open of this tab is empty too,
+ * not the recovery copy of another article. The recovery copy itself is
+ * left alone.
+ */
+export function startBlankTab() {
+  try {
+    sessionStorage.setItem(NEW_TAB_KEY, '1');
+    sessionStorage.removeItem(TAB_DRAFT_KEY);
+  } catch {
+    /* session storage unavailable - the tab is still blank right now */
+  }
+}
+
+/**
+ * Whether this tab already has a document of its own. A browser-duplicated
+ * tab does; a brand-new tab does not.
+ * @returns {boolean}
+ */
+export function hasTabDraft() {
+  try {
+    return sessionStorage.getItem(TAB_DRAFT_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reads the persisted draft of this tab, falling back to the recovery copy
+ * the last autosave left behind.
  * @returns {string}
  */
 export function loadDraft() {
+  try {
+    const own = sessionStorage.getItem(TAB_DRAFT_KEY);
+    if (own !== null) return own;
+    if (sessionStorage.getItem(NEW_TAB_KEY) === '1') return '';
+  } catch {
+    /* session storage unavailable */
+  }
+
   try {
     return localStorage.getItem(DRAFT_KEY) || '';
   } catch {
@@ -159,20 +227,6 @@ export function classifyPaste(currentLength, selectionStart, selectionEnd, paste
 }
 
 /**
- * Decides whether the incoming paste is a "major replacement" of the
- * document, using the real clipboard payload instead of a length guess.
- */
-function detectPasteIntent(event) {
-  const pasted = event.clipboardData?.getData('text/plain') ?? '';
-  return classifyPaste(
-    el.editor.value.length,
-    el.editor.selectionStart,
-    el.editor.selectionEnd,
-    pasted.length
-  );
-}
-
-/**
  * Handles a document mutation: stops narration when needed and notifies the
  * preview pipeline.
  * @param {'edited'|'replaced'} reason
@@ -187,7 +241,14 @@ function handleMutation(reason) {
   }
 
   updateStats();
-  scheduleDraftSave();
+  if (reason === 'replaced') {
+    // A whole new document (a paste, an import, a restore) is saved right
+    // away: it is the article the reader came for, not a keystroke to wait
+    // out. Typing keeps the auto-save delay from the preferences.
+    flushDraft();
+  } else {
+    scheduleDraftSave();
+  }
   emitChange(reason);
 }
 
@@ -476,9 +537,22 @@ export function initEditor(handlers = {}) {
   // Seed the buffer before any listener is attached
   el.editor.value = handlers.initialContent ?? '';
 
-  // Paste intent is captured before the content changes
+  // What the clipboard holds is a document of its own: it replaces the
+  // document that is there, instead of being slipped into it. A paste the
+  // browser does not share the text of (an image, say) is left to the
+  // browser, and an unchanged text is not pasted at all.
   el.editor.addEventListener('paste', (event) => {
-    pendingMutationReason = detectPasteIntent(event);
+    const pasted = event.clipboardData?.getData('text/plain') ?? '';
+    if (!pasted) return;
+
+    event.preventDefault();
+
+    if (pasted === el.editor.value) {
+      setMessage('The document already holds that text', { tone: 'muted', ttl: 2500 });
+      return;
+    }
+
+    setMarkdown(pasted, 'replaced');
   });
 
   el.editor.addEventListener('input', (event) => {
@@ -519,6 +593,16 @@ export function initEditor(handlers = {}) {
 
   // Drag & drop is handled by the app as a whole — a file, an address or
   // a piece of text can be dropped anywhere on it.
+
+  // The last keystrokes would take the draft timer with them if the tab was
+  // closed or hidden first. Write the draft now, while the page still exists.
+  if (!lifecycleBound) {
+    lifecycleBound = true;
+    window.addEventListener('pagehide', flushDraft);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushDraft();
+    });
+  }
 
   updateStats();
 }

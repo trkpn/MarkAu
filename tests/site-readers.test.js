@@ -18,12 +18,10 @@ const {
   extractJsonAfter
 } = await import('../src/youtube-to-markdown.js');
 
-const { parseSubstackPost, buildSubstackDocument, looksLikeSubstack } = await import(
-  '../src/substack-to-markdown.js'
-);
-const { parseRedditJson, parseRedditFeed, buildRedditDocument } = await import(
-  '../src/reddit-to-markdown.js'
-);
+const { parseSubstackPost, buildSubstackDocument, looksLikeSubstack } =
+  await import('../src/substack-to-markdown.js');
+const { parseRedditJson, parseRedditFeed, buildRedditDocument } =
+  await import('../src/reddit-to-markdown.js');
 
 /* ==========================================================================
  * YouTube
@@ -198,9 +196,9 @@ describe('reading a post', () => {
   });
 
   it('does not take an ordinary page for a post', () => {
-    expect(looksLikeSubstack('<html><body><article><p>Just a page.</p></article></body></html>')).toBe(
-      false
-    );
+    expect(
+      looksLikeSubstack('<html><body><article><p>Just a page.</p></article></body></html>')
+    ).toBe(false);
     expect(looksLikeSubstack('')).toBe(false);
   });
 
@@ -282,7 +280,10 @@ const REDDIT_JSON = JSON.stringify([
 
 describe('reading a thread', () => {
   it('finds the post and the comments', () => {
-    const thread = parseRedditJson(REDDIT_JSON, 'https://www.reddit.com/r/programming/comments/abc123/a_post/');
+    const thread = parseRedditJson(
+      REDDIT_JSON,
+      'https://www.reddit.com/r/programming/comments/abc123/a_post/'
+    );
 
     expect(thread.title).toBe('A post about code');
     expect(thread.subreddit).toBe('programming');
@@ -294,7 +295,10 @@ describe('reading a thread', () => {
   });
 
   it('builds a document of the thread', () => {
-    const thread = parseRedditJson(REDDIT_JSON, 'https://www.reddit.com/r/programming/comments/abc123/a_post/');
+    const thread = parseRedditJson(
+      REDDIT_JSON,
+      'https://www.reddit.com/r/programming/comments/abc123/a_post/'
+    );
     const document = buildRedditDocument(
       thread,
       thread.body,
@@ -323,7 +327,10 @@ describe('reading a thread', () => {
         </entry>
       </feed>`;
 
-    const thread = parseRedditFeed(feed, 'https://www.reddit.com/r/programming/comments/abc123/a_post/');
+    const thread = parseRedditFeed(
+      feed,
+      'https://www.reddit.com/r/programming/comments/abc123/a_post/'
+    );
 
     expect(thread.title).toBe('A post about code');
     expect(thread.subreddit).toBe('programming');

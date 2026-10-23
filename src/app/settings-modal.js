@@ -26,7 +26,9 @@ import {
   HIGHLIGHT_MODE_OPTIONS,
   AUTO_SAVE_OPTIONS,
   SAVE_FORMAT_OPTIONS,
-  LINE_HEIGHT_OPTIONS
+  LINE_HEIGHT_OPTIONS,
+  HISTORY_LIMIT_OPTIONS,
+  HISTORY_DELAY_OPTIONS
 } from '../settings-manager.js';
 import { setSplitAxis, setRatio, resetLayoutSizes, getRatio } from './layout.js';
 import { refreshPreview } from './preview.js';
@@ -36,6 +38,14 @@ import { confirmDialog } from './dialog.js';
 import { loadAllLanguages } from '../markdown-parser.js';
 import { defaultMarkdown } from '../sample-markdown.js';
 import { TARGET_LANGUAGES, DEFAULT_TARGET } from '../translation-languages.js';
+import {
+  clearHistory,
+  historyStats,
+  formatBytes,
+  onHistoryChange,
+  trimHistory
+} from '../version-history.js';
+import { openDialog as openHistoryDialog } from './history.js';
 
 /**
  * Fills a <select> with the given options.
@@ -87,6 +97,25 @@ function storageUsage() {
 }
 
 /**
+ * What the version history holds — how many versions, and how much space
+ * they take in the browser.
+ * @returns {string}
+ */
+function historyUsage() {
+  const stats = historyStats();
+  const noun = stats.count === 1 ? 'version' : 'versions';
+  return `${stats.count} ${noun} · ${formatBytes(stats.bytes)}`;
+}
+
+/**
+ * Writes the figure of the history into the preferences.
+ */
+function syncHistoryUsage() {
+  if (!el.historyUsageText) return;
+  el.historyUsageText.textContent = historyUsage();
+}
+
+/**
  * Syncs every control with the persisted settings.
  */
 function syncInputs() {
@@ -124,6 +153,16 @@ function syncInputs() {
     el.selectTranslateLanguage.value = settings.translateTarget || DEFAULT_TARGET;
   }
 
+  if (el.checkHistoryEnabled) {
+    el.checkHistoryEnabled.checked = settings.historyEnabled !== false;
+  }
+  if (el.selectHistoryLimit) {
+    el.selectHistoryLimit.value = String(settings.historyLimit);
+  }
+  if (el.selectHistoryDelay) {
+    el.selectHistoryDelay.value = String(settings.historyDelaySeconds);
+  }
+
   el.splitAxisInputs.forEach((input) => {
     input.checked = input.value === settings.splitAxis;
   });
@@ -135,6 +174,8 @@ function syncInputs() {
   if (el.storageUsageText) {
     el.storageUsageText.textContent = `Usage: ~${storageUsage()}`;
   }
+
+  syncHistoryUsage();
 }
 
 /**
@@ -168,6 +209,21 @@ function stopScrollPolling() {
 }
 
 /**
+ * The function that closes the preferences. It is set when the dialog is
+ * initialized, so that the dialog can also be closed from the outside.
+ */
+let closePreferences = null;
+
+/**
+ * Closes the preferences dialog from the outside — the version history
+ * opens over them, and a dialog on top of a dialog is a dialog on top of
+ * a dialog.
+ */
+export function closeSettings() {
+  closePreferences?.();
+}
+
+/**
  * Initializes the preferences modal.
  */
 export function initSettingsModal() {
@@ -185,6 +241,8 @@ export function initSettingsModal() {
   fillOptions(el.selectAutoSave, AUTO_SAVE_OPTIONS);
   fillOptions(el.selectSaveFormat, SAVE_FORMAT_OPTIONS);
   fillOptions(el.selectLineHeight, LINE_HEIGHT_OPTIONS);
+  fillOptions(el.selectHistoryLimit, HISTORY_LIMIT_OPTIONS);
+  fillOptions(el.selectHistoryDelay, HISTORY_DELAY_OPTIONS);
 
   // The languages the document can be translated into.
   fillOptions(
@@ -216,6 +274,8 @@ export function initSettingsModal() {
     if (target && typeof target.focus === 'function') target.focus();
     lastFocused = null;
   };
+
+  closePreferences = close;
 
   el.btnSettings?.addEventListener('click', open);
   el.btnCloseSettings?.addEventListener('click', close);
@@ -336,6 +396,45 @@ export function initSettingsModal() {
     saveSettings({ translateTarget: el.selectTranslateLanguage.value });
   });
 
+  // Version history
+  el.checkHistoryEnabled?.addEventListener('change', () => {
+    saveSettings({ historyEnabled: el.checkHistoryEnabled.checked });
+  });
+
+  el.selectHistoryLimit?.addEventListener('change', () => {
+    const limit = Number.parseInt(el.selectHistoryLimit.value, 10) || 30;
+    saveSettings({ historyLimit: limit });
+
+    // The versions that are already stored go at once, not only when the
+    // next one is taken.
+    trimHistory({ limit });
+  });
+
+  el.selectHistoryDelay?.addEventListener('change', () => {
+    saveSettings({
+      historyDelaySeconds: Number.parseInt(el.selectHistoryDelay.value, 10) || 10
+    });
+  });
+
+  el.btnHistorySettingsClear?.addEventListener('click', async () => {
+    const confirmed = await confirmDialog({
+      title: 'Clear the version history?',
+      message: 'Every stored version is removed. The document itself is not touched.',
+      confirmLabel: 'Clear history',
+      danger: true
+    });
+    if (!confirmed) return;
+
+    clearHistory();
+    syncHistoryUsage();
+    setMessage('The version history is empty', { tone: 'muted', ttl: 2500 });
+  });
+
+  el.btnHistoryOpen?.addEventListener('click', () => {
+    closeSettings();
+    openHistoryDialog();
+  });
+
   // Layout
   el.splitAxisInputs.forEach((input) => {
     input.addEventListener('change', () => {
@@ -382,6 +481,11 @@ export function initSettingsModal() {
     if (!el.modalSettings.hasAttribute('hidden')) {
       syncInputs();
     }
+  });
+
+  // The figure of the history changes with every version that is kept.
+  onHistoryChange(() => {
+    syncHistoryUsage();
   });
 
   syncInputs();

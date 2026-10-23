@@ -10,7 +10,7 @@ import globals from 'globals';
  */
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', '.zcode/**']
+    ignores: ['dist/**', 'node_modules/**', '.zcode/**', '.wrangler/**']
   },
   js.configs.recommended,
   {

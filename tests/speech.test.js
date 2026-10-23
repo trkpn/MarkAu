@@ -23,13 +23,54 @@ describe('buildChunks', () => {
     expect(chunks[0].charEnd).toBe(text.length);
   });
 
-  it('splits into sentences in sentence mode', () => {
+  it('groups short sentences into one request in sentence mode', () => {
     saveSettings({ speechChunk: 'sentence' });
     const text = 'First sentence here. Second sentence follows. Third one closes.';
     const chunks = buildChunks(text, 'en-US');
 
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].text).toBe(text);
+  });
+
+  it('cuts a long document at sentence ends', () => {
+    saveSettings({ speechChunk: 'sentence' });
+    const sentence = 'This sentence is long enough to be worth speaking on its own. ';
+    const text = sentence.repeat(12).trim();
+    const chunks = buildChunks(text, 'en-US');
+
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks[0].text.trim()).toBe('First sentence here.');
+    for (const chunk of chunks.slice(0, -1)) {
+      expect(chunk.text.trimEnd().endsWith('.')).toBe(true);
+    }
+  });
+
+  it('shortens the ceiling when the playback rate is slow', () => {
+    saveSettings({ speechChunk: 'sentence' });
+    const text = 'The narration of this document continues for a good while. '.repeat(10);
+    const slow = buildChunks(text, 'en-US', 0.5);
+    const fast = buildChunks(text, 'en-US', 2);
+
+    expect(slow.length).toBeGreaterThan(fast.length);
+  });
+
+  it('caps a long block so the browser does not cut it off', () => {
+    saveSettings({ speechChunk: 'block' });
+    const text = 'The document keeps going without any sentence boundary at all '.repeat(10);
+    const chunks = buildChunks(text, 'en-US');
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.text.length).toBeLessThanOrEqual(140);
+    }
+  });
+
+  it('keeps a Thai request shorter than an English one', () => {
+    saveSettings({ speechChunk: 'block' });
+    const text = 'ภาษาไทยเขียนติดกันเป็นประโยคยาว '.repeat(20);
+    const thai = buildChunks(text, 'th-TH');
+    const english = buildChunks(text, 'en-US');
+
+    expect(thai[0].text.length).toBeLessThan(english[0].text.length);
   });
 
   it('keeps the character ranges consistent with the source text', () => {

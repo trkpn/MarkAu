@@ -229,7 +229,9 @@ describe('knowing what is dropped', () => {
   });
 
   it('sees a link', () => {
-    expect(kindOfDrag(fakeTransfer({ types: ['text/uri-list', 'text/plain'] }))).toBe(DROP_KIND.URL);
+    expect(kindOfDrag(fakeTransfer({ types: ['text/uri-list', 'text/plain'] }))).toBe(
+      DROP_KIND.URL
+    );
   });
 
   it('sees a piece of text', () => {

@@ -64,9 +64,7 @@ export async function pdfToMarkdown(bytes, { url = '', maxPages = 0 } = {}) {
 
   const info = await document.getMetadata().catch(() => null);
   const title =
-    (info?.info?.Title || '').trim() ||
-    (info?.metadata?.title || '').trim() ||
-    nameFromUrl(url);
+    (info?.info?.Title || '').trim() || (info?.metadata?.title || '').trim() || nameFromUrl(url);
 
   const lines = [];
   const texts = [];

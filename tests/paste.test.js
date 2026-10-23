@@ -54,10 +54,9 @@ globalThis.document.execCommand = () => false;
  * The paste classification decides whether narration is interrupted, so it
  * is tested on its own — the DOM handler only collects the numbers.
  */
-const { classifyPaste, insertText, initEditor, onContentChange } = await import(
-  '../src/app/editor.js'
-);
-const { isEditorHidden } = await import('../src/app/paste.js');
+const { classifyPaste, insertText, initEditor, onContentChange } =
+  await import('../src/app/editor.js');
+const { pasteAsDocument } = await import('../src/app/paste.js');
 const { saveSettings } = await import('../src/settings-manager.js');
 
 // Registers the real mutation pipeline on the fake editor.
@@ -155,17 +154,110 @@ describe('insertText', () => {
   });
 });
 
-describe('isEditorHidden', () => {
-  it('is hidden in the preview view', () => {
-    saveSettings({ view: 'preview' });
-    expect(isEditorHidden()).toBe(true);
+describe('pasteAsDocument', () => {
+  beforeEach(() => {
+    fakeEditor.value = 'The old document';
   });
 
-  it('is visible in the edit and split views', () => {
-    saveSettings({ view: 'edit' });
-    expect(isEditorHidden()).toBe(false);
+  it('replaces the document with the pasted text', () => {
+    expect(pasteAsDocument('# The new document')).toBe(true);
+    expect(fakeEditor.value).toBe('# The new document');
+  });
 
+  it('replaces the document whatever the view is', () => {
     saveSettings({ view: 'split' });
-    expect(isEditorHidden()).toBe(false);
+    expect(pasteAsDocument('A new document')).toBe(true);
+    expect(fakeEditor.value).toBe('A new document');
+
+    saveSettings({ view: 'preview' });
+    expect(pasteAsDocument('Another one')).toBe(true);
+    expect(fakeEditor.value).toBe('Another one');
+  });
+
+  it('does nothing when the text is already the document', () => {
+    fakeEditor.value = '# The document';
+    expect(pasteAsDocument('# The document')).toBe(false);
+    expect(fakeEditor.value).toBe('# The document');
+  });
+
+  it('does nothing with an empty text', () => {
+    expect(pasteAsDocument('')).toBe(false);
+    expect(fakeEditor.value).toBe('The old document');
+  });
+
+  it('announces the replacement as a replacement', () => {
+    const reasons = [];
+    const stop = onContentChange(({ reason }) => reasons.push(reason));
+
+    pasteAsDocument('A completely new document');
+    stop();
+
+    expect(reasons).toEqual(['replaced']);
+  });
+
+  it('keeps nothing when the text is already the document', () => {
+    const reasons = [];
+    const stop = onContentChange(({ reason }) => reasons.push(reason));
+
+    pasteAsDocument('The old document');
+    stop();
+
+    expect(reasons).toEqual([]);
+  });
+});
+
+/**
+ * A paste inside the editor is intercepted: the clipboard text is read from
+ * the event itself, so the browser never slips it into the caret.
+ */
+describe('a paste in the editor', () => {
+  function paste(text, { readable = true } = {}) {
+    let prevented = false;
+
+    fakeEditor.dispatchEvent({
+      type: 'paste',
+      clipboardData: readable ? { getData: () => text } : null,
+      preventDefault: () => {
+        prevented = true;
+      }
+    });
+
+    return prevented;
+  }
+
+  beforeEach(() => {
+    fakeEditor.value = 'The old document';
+    fakeEditor.selectionStart = 0;
+    fakeEditor.selectionEnd = 0;
+  });
+
+  it('replaces the document with the text on the clipboard', () => {
+    const prevented = paste('# The new document');
+
+    expect(prevented).toBe(true);
+    expect(fakeEditor.value).toBe('# The new document');
+  });
+
+  it('ignores a caret: the text replaces the document, it is not inserted', () => {
+    fakeEditor.value = 'Hello world';
+    fakeEditor.selectionStart = 5;
+    fakeEditor.selectionEnd = 5;
+
+    paste('Goodbye');
+
+    expect(fakeEditor.value).toBe('Goodbye');
+  });
+
+  it('does nothing when the clipboard already holds the document', () => {
+    const prevented = paste('The old document');
+
+    expect(prevented).toBe(true);
+    expect(fakeEditor.value).toBe('The old document');
+  });
+
+  it('leaves a paste it cannot read to the browser', () => {
+    const prevented = paste('', { readable: false });
+
+    expect(prevented).toBe(false);
   });
 });

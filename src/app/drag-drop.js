@@ -16,8 +16,8 @@
  */
 
 import { el } from './dom.js';
-import { openFile, insertText, setMarkdown } from './editor.js';
-import { isEditorHidden } from './paste.js';
+import { openFile, setMarkdown } from './editor.js';
+import { pasteAsDocument } from './paste.js';
 import { runImport } from './url-import.js';
 import { setMessage } from './status.js';
 
@@ -101,7 +101,7 @@ function showOverlay(kind) {
   const messages = {
     [DROP_KIND.FILE]: 'Drop to open the file',
     [DROP_KIND.URL]: 'Drop to import the address',
-    [DROP_KIND.TEXT]: 'Drop to put the text into the document'
+    [DROP_KIND.TEXT]: 'Drop to replace the document with the text'
   };
 
   if (el.dropOverlayText) {
@@ -155,17 +155,9 @@ export async function handleDrop(dataTransfer) {
 
   const text = (dataTransfer?.getData('text/plain') || '').trim();
   if (text) {
-    // The rule of the app: what the user can see decides what happens. In
-    // Preview the editor is hidden, so there is no caret to aim at and
-    // the text becomes the document.
-    const replaceDocument = isEditorHidden();
-    insertText(text, { replaceDocument });
-    setMessage(
-      `Dropped ${text.length.toLocaleString()} characters${
-        replaceDocument ? '' : ' (at the cursor)'
-      }`,
-      { tone: 'accent', ttl: 2500 }
-    );
+    // A dropped text is a document of its own, the same as a pasted one:
+    // it replaces the document that is there.
+    pasteAsDocument(text, 'Dropped');
   }
 }
 

@@ -78,8 +78,7 @@ export function parseSubstackPost(html, pageUrl) {
   // word is in the script of the page as well, and a post that is open to
   // everyone would be taken for one that is not.
   const wall = doc.querySelector(PAYWALL_SELECTOR);
-  const paywalled =
-    Boolean(wall) || PAYWALL_WORDS.test(content.textContent || '');
+  const paywalled = Boolean(wall) || PAYWALL_WORDS.test(content.textContent || '');
 
   if (wall) wall.remove();
 

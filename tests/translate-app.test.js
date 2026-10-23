@@ -87,8 +87,8 @@ describe('the dialog', () => {
 
     // The language of the document is never asked for — there is only one
     // field, and it holds the language the text should end up in.
-    const labels = Array.from(document.querySelectorAll('#modal-translate label')).map(
-      (node) => node.textContent.trim()
+    const labels = Array.from(document.querySelectorAll('#modal-translate label')).map((node) =>
+      node.textContent.trim()
     );
     expect(labels.join(' ').toLowerCase()).not.toContain('from');
   });
@@ -225,10 +225,10 @@ describe('a translation of many parts', () => {
         );
       }
 
-      return new Response(
-        JSON.stringify({ sentences: [{ trans: 'TH<direct>' }], src: 'en' }),
-        { status: 200, headers: { 'content-type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ sentences: [{ trans: 'TH<direct>' }], src: 'en' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
     };
   }
 
@@ -375,10 +375,10 @@ describe('when the translator refuses', () => {
           { status: 429, headers: { 'content-type': 'application/json' } }
         );
       }
-      return new Response(
-        JSON.stringify({ sentences: [{ trans: 'แปลแล้ว' }], src: 'en' }),
-        { status: 200, headers: { 'content-type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ sentences: [{ trans: 'แปลแล้ว' }], src: 'en' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
     };
 
     el.editor.value = 'A paragraph of words.';
@@ -392,10 +392,10 @@ describe('when the translator refuses', () => {
 
   it('gives up after the last attempt and says so', async () => {
     globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({ ok: false, error: 'The translator is busy right now.' }),
-        { status: 429, headers: { 'content-type': 'application/json' } }
-      );
+      new Response(JSON.stringify({ ok: false, error: 'The translator is busy right now.' }), {
+        status: 429,
+        headers: { 'content-type': 'application/json' }
+      });
 
     el.editor.value = 'A paragraph of words.';
     el.editor.dispatchEvent(new Event('input', { bubbles: true }));

@@ -163,11 +163,7 @@ export function maskText(text, registry, used) {
         const start = match.indexOf(group);
         const id = issueToken(registry, group, { glueBefore: true });
         used.push(id);
-        return (
-          match.slice(0, start) +
-          `⟦${id}⟧` +
-          match.slice(start + group.length)
-        );
+        return match.slice(0, start) + `⟦${id}⟧` + match.slice(start + group.length);
       }
 
       if (rule.protect === 'marks') {

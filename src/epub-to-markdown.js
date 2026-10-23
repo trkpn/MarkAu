@@ -84,8 +84,7 @@ export function readBookManifest(files) {
     doc.querySelector('metadata title')?.textContent?.trim() ||
     '';
 
-  const author =
-    doc.querySelector('metadata > creator, creator')?.textContent?.trim() || '';
+  const author = doc.querySelector('metadata > creator, creator')?.textContent?.trim() || '';
 
   const language = doc.querySelector('metadata > language, language')?.textContent?.trim() || '';
 

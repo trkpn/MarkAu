@@ -77,13 +77,27 @@
             </button>
           </div>
 
-          <!-- Paste: drops the clipboard into the document without having to
-               leave the view you are reading in. -->
+          <div class="header-divider" aria-hidden="true"></div>
+
+          <!-- New tab: another article in a tab of its own. The tab starts
+               empty and keeps its own document; closing it is the end of the
+               article, and the last document stays recoverable. -->
+          <button
+            id="btn-new-tab"
+            class="btn btn-icon"
+            title="Open a new tab for another document"
+            aria-label="Open a new tab with an empty document"
+          >
+            <span class="btn-icon-slot" id="icon-new-tab" aria-hidden="true"></span>
+          </button>
+
+          <!-- Paste: the clipboard becomes the document — a new text replaces
+               the old one, without leaving the view you are reading in. -->
           <button
             id="btn-paste"
             class="btn btn-icon"
-            title="Paste the clipboard at the cursor"
-            aria-label="Paste the clipboard at the cursor"
+            title="Paste the clipboard as the new document"
+            aria-label="Paste the clipboard as the new document"
           >
             <span class="btn-icon-slot" id="icon-paste" aria-hidden="true"></span>
           </button>
@@ -111,8 +125,21 @@
             <span class="btn-icon-slot" id="icon-translate" aria-hidden="true"></span>
           </button>
 
-          <!-- Reset: empties the document, next to Paste so it is always
-               one click away. -->
+          <!-- History: the versions of the document, kept in this browser
+               alone. The button opens the list of them. -->
+          <button
+            id="btn-history"
+            class="btn btn-icon"
+            title="Version history"
+            aria-label="Open the version history"
+          >
+            <span class="btn-icon-slot" id="icon-history" aria-hidden="true"></span>
+          </button>
+
+          <div class="header-divider" aria-hidden="true"></div>
+
+          <!-- Reset: the destructive one, kept apart from the daily actions
+               and behind a confirmation. -->
           <button
             id="btn-reset"
             class="btn btn-icon"
@@ -126,16 +153,6 @@
         <!-- Zone 2: Audio Suite & Quick Tools (Standard Right) -->
         <div class="zone-right flex items-center gap-1.5">
           <div class="tts-group flex items-center gap-1.25">
-            <div class="voice-select-wrapper">
-              <select
-                id="voice-select"
-                class="select-control"
-                aria-label="Select speech synthesis voice"
-              >
-                <option value="">Detecting voices...</option>
-              </select>
-            </div>
-
             <div class="playback-btn-group flex items-center gap-1">
               <button
                 id="btn-play"
@@ -172,6 +189,16 @@
               <span id="rate-badge" class="rate-badge">1.0x</span>
             </div>
 
+            <div class="voice-select-wrapper">
+              <select
+                id="voice-select"
+                class="select-control"
+                aria-label="Select speech synthesis voice"
+              >
+                <option value="">Detecting voices...</option>
+              </select>
+            </div>
+
             <button
               id="btn-mic"
               class="btn btn-mic"
@@ -186,14 +213,6 @@
           <div class="header-divider" aria-hidden="true"></div>
 
           <div class="header-tools-quick flex items-center gap-0.5">
-            <button
-              id="btn-sample"
-              class="btn btn-icon"
-              title="Load sample"
-              aria-label="Load sample markdown"
-            >
-              <span class="btn-icon-slot" id="icon-sample" aria-hidden="true"></span>
-            </button>
             <button
               id="btn-copy"
               class="btn btn-icon"
@@ -210,6 +229,19 @@
             >
               <span class="btn-icon-slot" id="icon-print" aria-hidden="true"></span>
             </button>
+            <button
+              id="btn-sample"
+              class="btn btn-icon"
+              title="Load sample"
+              aria-label="Load sample markdown"
+            >
+              <span class="btn-icon-slot" id="icon-sample" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <div class="header-divider" aria-hidden="true"></div>
+
+          <div class="header-tools-quick flex items-center gap-0.5">
             <button
               id="btn-sync-scroll"
               class="btn btn-icon active"
@@ -440,11 +472,7 @@
             <span class="status-dot active" id="system-status-dot"></span>
             <span id="system-status-text">Client Ready</span>
           </div>
-          <span
-            id="speech-status-chip"
-            class="speech-status-chip"
-            role="status"
-            aria-live="polite"
+          <span id="speech-status-chip" class="speech-status-chip" role="status" aria-live="polite"
             >Click word to listen</span
           >
         </div>
@@ -627,6 +655,47 @@
                 </div>
               </div>
 
+              <!-- History Group -->
+              <div class="settings-section">
+                <div class="settings-section-title">History</div>
+                <div class="setting-checkbox-item">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="check-history-enabled" checked />
+                    <div class="checkbox-text">
+                      <strong>Keep a version history</strong>
+                      <span
+                        >A version is kept a few seconds after a change worth keeping — and before
+                        the document is replaced. Small edits wait for the next big one, or for
+                        Ctrl+S. The versions stay in this browser.</span
+                      >
+                    </div>
+                  </label>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-item flex-1">
+                    <label for="select-history-limit">How many versions</label>
+                    <select id="select-history-limit" class="select-control modal-select"></select>
+                  </div>
+                  <div class="setting-item flex-1">
+                    <label for="select-history-delay">Save after</label>
+                    <select id="select-history-delay" class="select-control modal-select"></select>
+                  </div>
+                </div>
+                <div class="storage-info-row">
+                  <div class="storage-meta">
+                    <span>Stored versions</span>
+                    <span id="history-usage-text">0 versions · 0 B</span>
+                  </div>
+                  <button id="btn-history-settings-clear" class="btn btn-sm">Clear history</button>
+                </div>
+                <div class="hint-row">
+                  <p class="hint-text">
+                    The versions live in this browser alone — nothing is sent anywhere.
+                  </p>
+                  <button id="btn-history-open" class="btn btn-sm">Open history</button>
+                </div>
+              </div>
+
               <!-- Web Import Group -->
               <div class="settings-section">
                 <div class="settings-section-title">Web import</div>
@@ -720,11 +789,15 @@
                   </div>
                   <div class="shortcut-row">
                     <kbd>Ctrl</kbd><kbd>S</kbd>
-                    <span>Save draft</span>
+                    <span>Save the draft and keep a version</span>
                   </div>
                   <div class="shortcut-row">
                     <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>V</kbd>
-                    <span>Paste the clipboard</span>
+                    <span>Paste as the new document</span>
+                  </div>
+                  <div class="shortcut-row">
+                    <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>H</kbd>
+                    <span>Open the version history</span>
                   </div>
                   <div class="shortcut-row">
                     <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>
@@ -819,9 +892,7 @@
 
           <div class="modal-body">
             <form id="translate-form" class="url-import-form">
-              <label class="url-import-label" for="select-translate-target">
-                Translate into
-              </label>
+              <label class="url-import-label" for="select-translate-target"> Translate into </label>
               <select
                 id="select-translate-target"
                 class="select-control modal-select"
@@ -849,6 +920,49 @@
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Version History Modal Dialog -->
+      <div id="modal-history" class="modal-backdrop" hidden>
+        <div
+          class="modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-history-title"
+        >
+          <div class="modal-header">
+            <div class="modal-title">
+              <span id="icon-history-modal" aria-hidden="true"></span>
+              <h3 id="modal-history-title">Version history</h3>
+            </div>
+            <button
+              id="btn-close-history"
+              class="btn btn-icon"
+              title="Close"
+              aria-label="Close the version history"
+            >
+              <span id="icon-close-history" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <div class="modal-body">
+            <p id="history-stats" class="history-stats">0 versions · 0 B</p>
+            <p id="history-empty" class="history-empty" hidden>
+              No version has been kept yet. One is kept a few seconds after a change worth keeping —
+              and before the document is replaced. Ctrl+S keeps one right away.
+            </p>
+            <div id="history-list" class="history-list"></div>
+            <div class="url-import-actions">
+              <button type="button" id="btn-history-save" class="btn btn-sm">
+                Save version now
+              </button>
+              <button type="button" id="btn-history-clear" class="btn btn-sm btn-danger">
+                Clear history
+              </button>
+              <button type="button" id="btn-history-close" class="btn">Close</button>
+            </div>
           </div>
         </div>
       </div>

@@ -240,12 +240,7 @@ export const equationNumberRule = {
 /**
  * All the rules a paper needs.
  */
-export const arxivRules = [
-  equationTableRule,
-  equationCellRule,
-  equationNumberRule,
-  latexMathRule
-];
+export const arxivRules = [equationTableRule, equationCellRule, equationNumberRule, latexMathRule];
 
 /**
  * Builds the document of a paper.

@@ -5,31 +5,20 @@
  * Puts the clipboard into the document without making the user leave the view
  * they are reading in.
  *
- * The rule follows what the user can actually see:
- *   • the editor is visible → the text lands at the caret, exactly like a
- *     manual paste (a selection is replaced)
- *   • the editor is hidden  → the document is replaced, because there is no
- *     caret to aim at
+ * The rule is the one the import follows: what is pasted is a document of its
+ * own. It replaces the document that is there instead of being slipped into
+ * it, so a new text is never mixed into the old one. A text that is already
+ * the document changes nothing at all.
  *
- * That is what makes the button useful in Preview mode: a new document can be
+ * That is what makes the button useful in every view: a new document can be
  * dropped into the app and read straight away, without switching to the
  * editor, pasting and switching back.
  * ============================================================================
  */
 
 import { el } from './dom.js';
-import { insertText } from './editor.js';
-import { getSettings, onSettingsChange } from '../settings-manager.js';
+import { setMarkdown } from './editor.js';
 import { setMessage } from './status.js';
-
-/**
- * True while the editor pane is hidden and the preview is the only thing on
- * screen.
- * @returns {boolean}
- */
-export function isEditorHidden() {
-  return getSettings().view === 'preview';
-}
 
 /**
  * Reads the plain text from the clipboard.
@@ -55,6 +44,33 @@ async function readClipboardText() {
 }
 
 /**
+ * Puts a text into the document as its new content.
+ *
+ * What arrives from the clipboard — a paste, a drop, the button — is a
+ * document of its own, so it replaces the document that is there. The same
+ * text that is already the document replaces nothing and keeps nothing.
+ *
+ * @param {string} text
+ * @param {string} [action] how the text arrived: "Pasted", "Dropped"
+ * @returns {boolean} whether the document was replaced
+ */
+export function pasteAsDocument(text, action = 'Pasted') {
+  if (!text) return false;
+
+  if (text === el.editor?.value) {
+    setMessage('The document already holds that text', { tone: 'muted', ttl: 2500 });
+    return false;
+  }
+
+  setMarkdown(text, 'replaced');
+  setMessage(`📋 ${action} as the new document (${text.length.toLocaleString()} characters)`, {
+    tone: 'accent',
+    ttl: 2500
+  });
+  return true;
+}
+
+/**
  * Pastes the clipboard into the document.
  * @returns {Promise<void>}
  */
@@ -76,41 +92,24 @@ export async function pasteFromClipboard() {
     return;
   }
 
-  const replaceDocument = isEditorHidden();
-  insertText(text, { replaceDocument });
-
-  const chars = text.length.toLocaleString();
-  setMessage(
-    replaceDocument
-      ? `📋 Document replaced from the clipboard (${chars} characters)`
-      : `📋 Pasted ${chars} characters at the cursor`,
-    { tone: 'accent', ttl: 2500 }
-  );
-}
-
-/**
- * Keeps the tooltip in step with the current view, so the button always says
- * what it is about to do.
- */
-function updatePasteButton() {
-  if (!el.btnPaste) return;
-
-  const label = isEditorHidden()
-    ? 'Paste the clipboard as the new document'
-    : 'Paste the clipboard at the cursor';
-
-  el.btnPaste.title = label;
-  el.btnPaste.setAttribute('aria-label', label);
+  pasteAsDocument(text);
 }
 
 /**
  * Initializes the paste button.
+ *
+ * The button does one thing in every view now, so its label is written once
+ * instead of being kept in step with the view.
  */
 export function initPaste() {
+  const label = 'Paste the clipboard as the new document';
+
+  if (el.btnPaste) {
+    el.btnPaste.title = label;
+    el.btnPaste.setAttribute('aria-label', label);
+  }
+
   el.btnPaste?.addEventListener('click', () => {
     pasteFromClipboard();
   });
-
-  onSettingsChange(updatePasteButton);
-  updatePasteButton();
 }

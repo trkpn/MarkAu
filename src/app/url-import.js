@@ -3,11 +3,8 @@
  * URL IMPORT
  * Brings a document in from a web address.
  *
- * The rule of the app is followed here as well: what the user can see
- * decides what happens.
- *   • the editor is visible → the document lands at the caret, the way a
- *     paste does
- *   • the editor is hidden  → the document replaces the current one
+ * An imported document replaces the one that is there, the way opening a
+ * file or pasting does: a new text is never mixed into the old one.
  *
  * How the content is reached depends on the source:
  *
@@ -297,8 +294,13 @@ async function fetchRawMarkdown(source) {
  * @returns {Promise<{ markdown: string, title: string, sourceUrl: string, note: string }>}
  */
 async function fetchYoutubeVideo(source) {
-  const { parseVideoDetails, findCaptionTrack, parseCaptionTrack, transcriptToMarkdown, buildVideoDocument } =
-    await import('../youtube-to-markdown.js');
+  const {
+    parseVideoDetails,
+    findCaptionTrack,
+    parseCaptionTrack,
+    transcriptToMarkdown,
+    buildVideoDocument
+  } = await import('../youtube-to-markdown.js');
 
   const { html } = await fetchHtml(source.url);
   const details = parseVideoDetails(html);
@@ -363,9 +365,8 @@ async function fetchYoutubeVideo(source) {
  * @returns {Promise<{ markdown: string, title: string, sourceUrl: string, note: string }>}
  */
 async function fetchYoutubePlaylist(source) {
-  const { extractJsonAfter, collectPlaylistVideos, formatTime } = await import(
-    '../youtube-to-markdown.js'
-  );
+  const { extractJsonAfter, collectPlaylistVideos, formatTime } =
+    await import('../youtube-to-markdown.js');
 
   const { html } = await fetchHtml(source.url);
   const data = extractJsonAfter(html, 'ytInitialData');
@@ -451,7 +452,8 @@ async function buildSubstackFromHtml(html, finalUrl, sourceUrl = '') {
  * @returns {Promise<{ markdown: string, title: string, sourceUrl: string, note: string }>}
  */
 async function fetchRedditThread(source) {
-  const { parseRedditJson, parseRedditFeed, buildRedditDocument } = await import('../reddit-to-markdown.js');
+  const { parseRedditJson, parseRedditFeed, buildRedditDocument } =
+    await import('../reddit-to-markdown.js');
 
   const base = `https://www.reddit.com/r/${source.subreddit}/comments/${source.id}/${source.slug}`;
   let lastError = null;
@@ -505,7 +507,11 @@ async function fetchRedditThread(source) {
   if (getSettings().readerFallback) {
     try {
       const result = await fetchViaReaderFallback(source.url);
-      return { ...result, title: result.title || 'Reddit thread', note: 'thread (read by the fallback service)' };
+      return {
+        ...result,
+        title: result.title || 'Reddit thread',
+        note: 'thread (read by the fallback service)'
+      };
     } catch (err) {
       lastError = err instanceof ImportError ? err : lastError;
     }
@@ -575,7 +581,8 @@ function sourceUrlOf(thread) {
  * @returns {Promise<{ markdown: string, title: string, sourceUrl: string, note: string }>}
  */
 async function fetchRedditSubreddit(source) {
-  const { parseRedditFeedEntries, buildSubredditDocument } = await import('../reddit-to-markdown.js');
+  const { parseRedditFeedEntries, buildSubredditDocument } =
+    await import('../reddit-to-markdown.js');
 
   const xml = await fetchTextWithFallback(
     `https://www.reddit.com/r/${source.subreddit}/.rss?limit=25`
@@ -641,9 +648,13 @@ async function fetchArxivPaper(source) {
 
       if (hasRenderedPaper(html)) {
         const paperHtml = extractPaperHtml(html);
-        paperMarkdown = await htmlToMarkdownFragment(paperHtml, `https://arxiv.org/html/${source.paperId}`, {
-          rules: arxivRules
-        });
+        paperMarkdown = await htmlToMarkdownFragment(
+          paperHtml,
+          `https://arxiv.org/html/${source.paperId}`,
+          {
+            rules: arxivRules
+          }
+        );
       }
     }
   } catch {
@@ -694,11 +705,7 @@ async function fetchArxivPaper(source) {
     }),
     title: metadata.title,
     sourceUrl: metadata.absUrl || `https://arxiv.org/abs/${source.paperId}`,
-    note: paperMarkdown
-      ? paperFromPdf
-        ? 'paper (from the PDF)'
-        : 'paper'
-      : 'paper (summary only)'
+    note: paperMarkdown ? (paperFromPdf ? 'paper (from the PDF)' : 'paper') : 'paper (summary only)'
   };
 }
 
@@ -1029,8 +1036,12 @@ function splitFrontmatter(text) {
 export function buildDocument(result) {
   const { data, body } = splitFrontmatter(result.markdown);
 
-  const title = String(data.title || result.title || '').replace(/\s+/g, ' ').trim();
-  const source = String(result.sourceUrl || '').replace(/\s+/g, ' ').trim();
+  const title = String(data.title || result.title || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const source = String(result.sourceUrl || '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   const lines = [];
   for (const [key, value] of Object.entries(data)) {
@@ -1143,7 +1154,9 @@ export async function runImport(input) {
     }
 
     const message =
-      err instanceof ImportError ? err.message : `That address could not be read (${reasonOf(err)}).`;
+      err instanceof ImportError
+        ? err.message
+        : `That address could not be read (${reasonOf(err)}).`;
     showError(message);
     setMessage(message, { tone: 'warn', ttl: 5000 });
     return false;

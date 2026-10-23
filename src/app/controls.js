@@ -124,6 +124,11 @@ function initTransport() {
       setMessage('Speech engine stopped unexpectedly', { tone: 'warn', ttl: 4000 });
     } else if (reason === 'no-start') {
       setMessage('The speech engine did not start — try again', { tone: 'warn', ttl: 4000 });
+    } else if (reason === 'other-tab') {
+      setMessage('Paused - another tab is reading. Press Play to take over.', {
+        tone: 'muted',
+        ttl: 6000
+      });
     }
   });
 }

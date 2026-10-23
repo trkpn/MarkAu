@@ -34,9 +34,7 @@ describe('the narration of a transcript', () => {
   });
 
   it('does not read the time aloud', () => {
-    const { tokens } = tokenize(
-      '<p><strong>0:43</strong> Never gonna give you up</p>'
-    );
+    const { tokens } = tokenize('<p><strong>0:43</strong> Never gonna give you up</p>');
 
     const spoken = tokens.map((token) => token.text).join(' ');
 

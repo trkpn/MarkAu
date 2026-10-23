@@ -35,11 +35,7 @@ import {
   tokensIntact,
   normalizeEol
 } from '../translation.js';
-import {
-  translateUnits,
-  planRequests,
-  TranslateError
-} from '../translation-provider.js';
+import { translateUnits, planRequests, TranslateError } from '../translation-provider.js';
 
 /** The endpoint of the translator. It is on the same origin. */
 const TRANSLATE_ENDPOINT = '/api/translate';
@@ -98,10 +94,7 @@ export function saveBackup(markdown, target) {
   if (readBackup()) return false;
 
   try {
-    localStorage.setItem(
-      BACKUP_KEY,
-      JSON.stringify({ markdown, target, at: Date.now() })
-    );
+    localStorage.setItem(BACKUP_KEY, JSON.stringify({ markdown, target, at: Date.now() }));
   } catch {
     /* the storage may be full — the translation still happened */
   }
@@ -208,9 +201,7 @@ async function requestThroughServer(units, target) {
   }
 
   if (!payload || payload.ok !== true) {
-    const error = new TranslationError(
-      payload?.error || 'The document could not be translated.'
-    );
+    const error = new TranslationError(payload?.error || 'The document could not be translated.');
     error.busy = busy;
     throw error;
   }

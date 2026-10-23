@@ -141,7 +141,11 @@ describe('reading a book', () => {
 
   it('turns the chapters of the book into a document', async () => {
     const book = await epubToMarkdown(buildBook(), {
-      toMarkdown: async (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      toMarkdown: async (html) =>
+        html
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
     });
 
     expect(book.title).toBe('A Small Book');

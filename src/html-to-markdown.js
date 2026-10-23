@@ -277,7 +277,9 @@ export async function htmlToMarkdown(html, pageUrl) {
  * @returns {string}
  */
 function withTitle(markdown, title) {
-  const heading = String(title || '').replace(/\s+/g, ' ').trim();
+  const heading = String(title || '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!heading) return markdown;
   if (markdown.startsWith('#')) return markdown;
 

@@ -38,8 +38,7 @@ const ALLOWED_PORTS = ['', '80', '443'];
 /** The headers the proxy sends. */
 const DEFAULT_HEADERS = {
   'User-Agent': 'MarkAu/1.0 (+https://markau.pages.dev)',
-  Accept:
-    'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
   'Accept-Language': 'en;q=0.9,*;q=0.5'
 };
 
@@ -296,7 +295,10 @@ export async function fetchThroughProxy(
       if (err && err.name === 'AbortError') {
         throw new ProxyError('The page took too long to answer.', 504);
       }
-      throw new ProxyError(`The page could not be reached: ${err?.message || 'unknown error'}`, 502);
+      throw new ProxyError(
+        `The page could not be reached: ${err?.message || 'unknown error'}`,
+        502
+      );
     } finally {
       clearTimeout(timer);
     }
