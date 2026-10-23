@@ -43,7 +43,6 @@ import { setSTTLocale } from '@/speech/stt.js';
 import { getSettings, onSettingsChange } from '@/core/settings.js';
 import { lineAtOffset, onContentChange } from '@/app/editor/editor.js';
 import { setMessage, clearMessage } from '@/app/shell/status.js';
-import { toggleNarration } from '@/app/preview/narration.js';
 import { LARGE_DOC_CHARS, yieldToMainThread } from '@/core/schedule.js';
 
 let renderTimer = null;
@@ -1281,8 +1280,13 @@ function handleLinkClick(linkEl) {
 
 /**
  * Initializes the preview pipeline.
+ *
+ * @param {object} [handlers]
+ * @param {() => 'playing'|'paused'|'resumed'|'starting'|'empty'} [handlers.onToggleNarration]
+ *   what a click on the empty space of the preview should do; the narration
+ *   owns that decision, and the preview must not import it back.
  */
-export function initPreview() {
+export function initPreview(handlers = {}) {
   setScrollContainer(el.previewWrapper);
   setPreviewContainer(el.preview);
   applyFollowSetting();
@@ -1442,7 +1446,8 @@ export function initPreview() {
 
     // Empty space outside the text does exactly what the Space key does:
     // the reading starts, pauses and resumes again.
-    const state = toggleNarration();
+    const state = handlers.onToggleNarration?.();
+    if (!state) return;
     if (state === 'paused') {
       setMessage('Paused - press Space to continue', { tone: 'accent', ttl: 2500 });
     } else if (state === 'empty') {

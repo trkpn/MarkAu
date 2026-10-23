@@ -16,6 +16,7 @@
  *   app/shell/status.js       — footer status manager
  *   app/shell/layout.js       — view switcher, panel arrangement, splitter
  *   app/editor/editor.js      — buffer, draft persistence, replacement detection
+ *   app/editor/export-file.js — download the document as Markdown or HTML
  *   app/preview/preview.js    — render pipeline, tokenization, sync scrolling
  *   app/shell/controls.js     — header controls
  *   app/editor/paste.js       — clipboard paste
@@ -43,7 +44,9 @@ import {
   startBlankTab,
   onContentChange
 } from '@/app/editor/editor.js';
+import { saveFile } from '@/app/editor/export-file.js';
 import { initPreview, forgetTabPosition } from '@/app/preview/preview.js';
+import { toggleNarration } from '@/app/preview/narration.js';
 import { initControls } from '@/app/shell/controls.js';
 import { initPaste } from '@/app/editor/paste.js';
 import { initUrlImport } from '@/app/import/url-import.js';
@@ -144,9 +147,10 @@ async function initApp() {
     initialContent: hasDraft ? draft : draft || defaultMarkdown,
     onSample: loadSampleDocument,
     onCopy: copyMarkdown,
-    onClear: clearDocument
+    onClear: clearDocument,
+    onSave: saveFile
   });
-  initPreview();
+  initPreview({ onToggleNarration: toggleNarration });
 
   // 3. Chrome
   initControls();
