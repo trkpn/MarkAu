@@ -32,7 +32,7 @@ import {
   setNetworkState
 } from '@/app/shell/status.js';
 import { printDocument } from '@/app/editor/print.js';
-import { toggleNarration } from '@/app/preview/narration.js';
+import { toggleNarration, cancelPendingStart } from '@/app/preview/narration.js';
 import { groupVoices } from '@/speech/voices.js';
 
 /* ==========================================================================
@@ -48,12 +48,17 @@ function initTransport() {
   el.btnPlay.addEventListener('click', () => {
     const state = toggleNarration();
     if (state === 'paused') {
-      setMessage('Paused — press Space to continue', { tone: 'accent', ttl: 2500 });
+      setMessage('Paused - press Space to continue', { tone: 'accent', ttl: 2500 });
+    } else if (state === 'empty') {
+      setMessage('Nothing to read', { tone: 'muted', ttl: 2000 });
     } else if (state === 'playing') {
-      setMessage('Reading…', { tone: 'accent', ttl: 1500 });
+      setMessage('Reading.', { tone: 'accent', ttl: 1500 });
     }
   });
-  el.btnStop.addEventListener('click', () => stop('user'));
+  el.btnStop.addEventListener('click', () => {
+    cancelPendingStart();
+    stop('user');
+  });
 
   el.rateSlider.addEventListener('input', (event) => {
     const value = Number.parseFloat(event.target.value);

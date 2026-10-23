@@ -11,7 +11,7 @@
 import { el } from '@/app/shell/dom.js';
 import { stop, isSpeechPaused, onTTSStateChange } from '@/speech/tts.js';
 import { icons } from '@/ui/icons.js';
-import { toggleNarration } from '@/app/preview/narration.js';
+import { toggleNarration, cancelPendingStart } from '@/app/preview/narration.js';
 
 let dismissed = false;
 
@@ -76,6 +76,7 @@ export function initMiniPlayer() {
   });
 
   el.mpStop?.addEventListener('click', () => {
+    cancelPendingStart();
     stop('user');
     setVisible(false);
   });

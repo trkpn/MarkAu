@@ -37,7 +37,7 @@ A fast, lightweight and offline-capable Markdown editor with real-time text-to-s
 - **Offline Ready:** The service worker serves the app shell and every asset from the cache, so a cold start without a network loads in milliseconds. Zero network fonts, client-side persistence.
 - **No flash on load:** The stylesheet is linked in the document head, so the browser paints the styled shell immediately instead of an unstyled skeleton while the script boots.
 - **Preferences:** Three independent font levels — _Interface_ (app chrome), _Reading_ (the rendered document) and _Editor_ (the Markdown source) — plus preview size, line spacing, theme, sync mode, narration mode, auto-save, panel arrangement and more. Every font can stay on the operating system's default.
-- **Several tabs at once:** Each tab keeps its own document and scroll position, so several articles can be read one tab at a time and closed when done; preferences and the version history are shared and follow a change made in another tab, and only one tab narrates at a time.
+- **Several tabs at once:** Each tab keeps its own document and scroll position, so several articles can be read one tab at a time and closed when done; preferences and the version history are shared and follow a change made in another tab. Each tab narrates on its own unless _Pause narration in other tabs_ is switched on.
 
 ---
 
@@ -213,7 +213,7 @@ Two or three tabs of the app can be open, each with its own document. The **Open
 
 Opening the app URL by hand follows the same idea: if another tab is already open, the new one starts empty instead of showing the article of the first; when it is the only tab, it resumes the last document. A browser-duplicated tab and a reload keep the document that is on their screen.
 
-What is shared, is shared live: a preference changed in one tab is applied to the others as soon as it is saved, and an open history dialog re-reads the history when another tab writes a version. Two tabs do not narrate at the same time — the moment one tab starts reading, the others pause with **Paused — another tab is reading. Press Play to take over.**; pressing Play there takes the reading back, and the first tab pauses in turn.
+What is shared, is shared live: a preference changed in one tab is applied to the others as soon as it is saved, and an open history dialog re-reads the history when another tab writes a version. Narration is per tab by default. Switch on _Pause narration in other tabs_ to keep only one tab speaking: the moment one tab starts reading, the others pause with **Paused — another tab is reading. Press Play to take over.**; pressing Play there takes the reading back, and the first tab pauses in turn.
 
 The tab strip is the list of open documents: each tab is named after its document (the front-matter title, the first heading, or the first line), and the tab that is reading carries a **▶** and a green dot on its icon. Switching away from a tab, or closing it, writes the draft and the reading position right away, so the last few seconds of typing are not lost to a pending timer. A tab that is put into the back/forward cache stops reading instead of being left silently "playing".
 

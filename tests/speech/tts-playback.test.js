@@ -71,6 +71,7 @@ globalThis.localStorage = {
 
 const tts = await import('@/speech/tts.js');
 const { initDocumentTitle } = await import('@/app/editor/document-title.js');
+const { saveSettings } = await import('@/core/settings.js');
 
 const SENTENCES = [
   'The first sentence of the document is long enough to carry some words of its own.',
@@ -95,6 +96,45 @@ function loadDocument(text) {
   tts.setPreviewContainer(preview);
   tts.markTokensStale('test');
   tts.ensureTokens();
+}
+
+/**
+ * Builds a preview whose first Play uses a window, not a full token pass.
+ * The paragraphs get fake geometry so the visible-block search can run.
+ * @param {string[]} texts
+ */
+function loadWindowedDocument(texts) {
+  let offset = 0;
+  const scroller = document.createElement('div');
+  Object.defineProperty(scroller, 'clientHeight', { value: 100 });
+  scroller.getBoundingClientRect = () => ({ top: 0, bottom: 100, left: 0, right: 0 });
+
+  const preview = document.createElement('div');
+  texts.forEach((text, index) => {
+    const paragraph = document.createElement('p');
+    paragraph.textContent = text;
+    paragraph.getBoundingClientRect = () => ({
+      top: index * 100 - offset,
+      bottom: index * 100 - offset + 100,
+      left: 0,
+      right: 0
+    });
+    preview.appendChild(paragraph);
+  });
+
+  scroller.appendChild(preview);
+  document.body.appendChild(scroller);
+
+  tts.setScrollContainer(scroller);
+  tts.setPreviewContainer(preview);
+  tts.markTokensStale('test');
+
+  return {
+    preview,
+    scrollTo(nextOffset) {
+      offset = nextOffset;
+    }
+  };
 }
 
 /**
@@ -137,6 +177,8 @@ describe('narration that the browser drops', () => {
 
   afterEach(() => {
     tts.stop();
+    tts.setScrollContainer(null);
+    saveSettings({ pauseOtherTabs: false, readDiagramLabels: false });
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -308,6 +350,9 @@ describe('narration that the browser drops', () => {
     const states = [];
     const off = tts.onTTSStateChange((state) => states.push(state));
 
+    // The cross-tab hand-shake is off by default; this test asks for it.
+    saveSettings({ pauseOtherTabs: true });
+
     loadDocument(SENTENCES.join(' '));
     await startReading();
     fakeSpeech.spoken[0].onstart();
@@ -323,6 +368,7 @@ describe('narration that the browser drops', () => {
 
     expect(tts.isSpeechPaused()).toBe(true);
     expect(states.at(-1).reason).toBe('other-tab');
+    saveSettings({ pauseOtherTabs: false });
     off();
   });
 
@@ -351,6 +397,8 @@ describe('narration that the browser drops', () => {
   });
 
   it('takes the reading back when Play is pressed after another tab paused it', async () => {
+    saveSettings({ pauseOtherTabs: true });
+
     loadDocument(SENTENCES.join(' '));
     await startReading();
     fakeSpeech.spoken[0].onstart();
@@ -368,6 +416,24 @@ describe('narration that the browser drops', () => {
 
     expect(tts.isSpeechPaused()).toBe(false);
     expect(localStorage.getItem('markau_narration_ping')).not.toBe(pausedPing);
+    saveSettings({ pauseOtherTabs: false });
+  });
+
+  it('keeps reading when another tab starts and the hand-shake is off', async () => {
+    saveSettings({ pauseOtherTabs: false });
+
+    loadDocument(SENTENCES.join(' '));
+    await startReading();
+    fakeSpeech.spoken[0].onstart();
+
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: 'markau_narration_ping',
+        newValue: String(Date.now())
+      })
+    );
+
+    expect(tts.isSpeechPaused()).toBe(false);
   });
 
   it('carries the document language to the engine', async () => {
@@ -394,6 +460,8 @@ describe('windowed tokenization', () => {
 
   afterEach(() => {
     tts.stop();
+    tts.setScrollContainer(null);
+    saveSettings({ pauseOtherTabs: false, readDiagramLabels: false });
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -416,6 +484,93 @@ describe('windowed tokenization', () => {
     expect(preview.querySelectorAll('.tts-word').length).toBeGreaterThan(0);
     expect(preview.lastElementChild.querySelector('.tts-word')).toBeNull();
   });
+
+  it('does not enter the starting state for an empty preview', () => {
+    const preview = document.createElement('div');
+    document.body.appendChild(preview);
+
+    tts.setPreviewContainer(preview);
+    tts.markTokensStale('test');
+
+    const states = [];
+    const off = tts.onTTSStateChange((state) => states.push(state));
+
+    expect(tts.play()).toBe(false);
+    expect(states.some((state) => state.starting)).toBe(false);
+    expect(tts.isSpeaking()).toBe(false);
+
+    off();
+  });
+
+  it('resumes the same utterance without re-tokenizing after a scroll', async () => {
+    const { preview, scrollTo } = loadWindowedDocument([
+      'The first paragraph is long enough to be read without the rest of the document.',
+      'The second paragraph follows it and is also long enough to be spoken in turn.',
+      'The third paragraph closes the small document used by this test.'
+    ]);
+
+    tts.play();
+    await vi.advanceTimersByTimeAsync(60);
+    fakeSpeech.spoken[0].onstart();
+
+    const firstWord = preview.querySelector('.tts-word');
+    expect(firstWord).not.toBeNull();
+
+    tts.pause();
+    expect(tts.isSpeechPaused()).toBe(true);
+
+    // The reader has moved to another block while the reading was paused.
+    scrollTo(150);
+
+    const resume = vi.spyOn(fakeSpeech, 'resume');
+    tts.play();
+
+    expect(resume).toHaveBeenCalled();
+    expect(tts.isSpeechPaused()).toBe(false);
+    expect(preview.querySelector('.tts-word')).toBe(firstWord);
+  });
+
+  it('starts at the first readable block after images', async () => {
+    const preview = document.createElement('div');
+    for (let index = 0; index < 3; index += 1) {
+      const paragraph = document.createElement('p');
+      paragraph.appendChild(document.createElement('img'));
+      preview.appendChild(paragraph);
+    }
+    const readable = document.createElement('p');
+    readable.textContent = 'Readable text after the images.';
+    preview.appendChild(readable);
+
+    document.body.appendChild(preview);
+    tts.setPreviewContainer(preview);
+    tts.markTokensStale('test');
+
+    await startReading();
+
+    expect(fakeSpeech.spoken.some((utterance) => utterance.text.includes('Readable'))).toBe(true);
+  });
+
+  it('wraps diagram labels in SVG tspans instead of breaking the drawing', () => {
+    saveSettings({ readDiagramLabels: true });
+
+    const preview = document.createElement('div');
+    preview.innerHTML = `
+      <figure class="mermaid-block" data-mermaid="true">
+        <div class="mermaid-viewport"><div class="mermaid-canvas">
+          <svg xmlns="http://www.w3.org/2000/svg"><text>Hello diagram</text></svg>
+        </div></div>
+        <pre class="mermaid-source" hidden><code>graph TD; A-->B;</code></pre>
+      </figure>`;
+    document.body.appendChild(preview);
+
+    tts.setPreviewContainer(preview);
+    tts.markTokensStale('test');
+    tts.ensureTokens();
+
+    const label = preview.querySelector('svg text');
+    expect(label.querySelector('tspan.tts-word')).not.toBeNull();
+    expect(label.textContent).toContain('Hello');
+  });
 });
 
 describe('window extension', () => {
@@ -432,6 +587,8 @@ describe('window extension', () => {
 
   afterEach(() => {
     tts.stop();
+    tts.setScrollContainer(null);
+    saveSettings({ pauseOtherTabs: false, readDiagramLabels: false });
     vi.restoreAllMocks();
     vi.useRealTimers();
   });

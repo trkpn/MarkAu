@@ -78,6 +78,7 @@ export const el = {
   selectFontSize: document.getElementById('select-font-size'),
   selectLineHeight: document.getElementById('select-line-height'),
   checkAutoStop: document.getElementById('check-auto-stop'),
+  checkPauseOtherTabs: document.getElementById('check-pause-other-tabs'),
   checkVsCodeLinks: document.getElementById('check-vscode-links'),
   checkRememberPosition: document.getElementById('check-remember-position'),
   checkFollow: document.getElementById('check-follow'),

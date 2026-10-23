@@ -21,7 +21,15 @@ export const HUGE_DOC_CHARS = 3_000_000;
 export const RENDER_CHUNK_CHARS = 32_000;
 
 /** How much speech text one narrator window should cover. */
-export const TTS_WINDOW_CHARS = 12_000;
+export const TTS_WINDOW_CHARS = 6_000;
+
+/**
+ * How much text the first window should cover.
+ *
+ * The first Play must not spend its whole click tokenizing a large part of
+ * the page: the window grows while the voice is already speaking.
+ */
+export const TTS_START_WINDOW_CHARS = 2_500;
 
 /** How many source lines the translator reads ahead of the viewport. */
 export const TRANSLATE_LOOKAHEAD_LINES = 160;

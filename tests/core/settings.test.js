@@ -28,7 +28,8 @@ describe('sanitizeSettings', () => {
       autoSaveSeconds: 10,
       saveFormat: 'html',
       rememberPosition: false,
-      followWhileReading: false
+      followWhileReading: false,
+      pauseOtherTabs: true
     });
 
     expect(result.fontUi).toBe('Inter');
@@ -41,6 +42,7 @@ describe('sanitizeSettings', () => {
     expect(result.saveFormat).toBe('html');
     expect(result.rememberPosition).toBe(false);
     expect(result.followWhileReading).toBe(false);
+    expect(result.pauseOtherTabs).toBe(true);
   });
 
   it('keeps the language the document is translated into', () => {

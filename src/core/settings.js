@@ -181,6 +181,7 @@ export const DEFAULT_SETTINGS = {
   lineHeight: '1.75',
   // Behaviour
   autoStopOnReplace: true,
+  pauseOtherTabs: false,
   smoothScrollActive: true,
   openFileInVsCode: true,
   syncMode: 'ratio',
@@ -265,6 +266,7 @@ export function sanitizeSettings(raw) {
     ),
     lineHeight: oneOf(source.lineHeight, LINE_HEIGHT_OPTIONS, d.lineHeight),
     autoStopOnReplace: bool(source.autoStopOnReplace, d.autoStopOnReplace),
+    pauseOtherTabs: bool(source.pauseOtherTabs, d.pauseOtherTabs),
     smoothScrollActive: bool(source.smoothScrollActive, d.smoothScrollActive),
     openFileInVsCode: bool(source.openFileInVsCode, d.openFileInVsCode),
     syncMode: oneOf(source.syncMode, SYNC_MODES, d.syncMode),

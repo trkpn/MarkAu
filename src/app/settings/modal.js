@@ -135,6 +135,9 @@ function syncInputs() {
   el.selectTheme.value = settings.theme;
 
   el.checkAutoStop.checked = settings.autoStopOnReplace;
+  if (el.checkPauseOtherTabs) {
+    el.checkPauseOtherTabs.checked = settings.pauseOtherTabs === true;
+  }
   el.checkRememberPosition.checked = settings.rememberPosition;
   el.checkFollow.checked = settings.followWhileReading;
   if (el.checkDiagramLabels) {
@@ -375,6 +378,10 @@ export function initSettingsModal() {
   // Narration
   el.checkAutoStop?.addEventListener('change', () => {
     saveSettings({ autoStopOnReplace: el.checkAutoStop.checked });
+  });
+
+  el.checkPauseOtherTabs?.addEventListener('change', () => {
+    saveSettings({ pauseOtherTabs: el.checkPauseOtherTabs.checked });
   });
 
   el.checkVsCodeLinks?.addEventListener('change', () => {

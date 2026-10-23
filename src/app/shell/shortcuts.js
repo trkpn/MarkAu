@@ -17,7 +17,7 @@
  */
 
 import { el } from '@/app/shell/dom.js';
-import { stop, isSpeaking } from '@/speech/tts.js';
+import { stop, isSpeaking, isNarrationStarting } from '@/speech/tts.js';
 import { applyFormat, flushDraft } from '@/app/editor/editor.js';
 import { setView } from '@/app/shell/layout.js';
 import { pasteFromClipboard } from '@/app/editor/paste.js';
@@ -25,7 +25,7 @@ import { openDialog as openUrlImportDialog } from '@/app/import/url-import.js';
 import { openDialog as openTranslateDialog } from '@/app/translate/translate.js';
 import { openDialog as openHistoryDialog, captureNow } from '@/app/history/dialog.js';
 import { openNewTab } from '@/app/editor/new-tab.js';
-import { toggleNarration } from '@/app/preview/narration.js';
+import { toggleNarration, cancelPendingStart } from '@/app/preview/narration.js';
 import { setMessage } from '@/app/shell/status.js';
 
 /**
@@ -108,7 +108,8 @@ function onKeyDown(event) {
     if (el.modalUrlImport && !el.modalUrlImport.hasAttribute('hidden')) return; // handled by the modal
     if (el.modalTranslate && !el.modalTranslate.hasAttribute('hidden')) return; // handled by the modal
     if (el.modalHistory && !el.modalHistory.hasAttribute('hidden')) return; // handled by the modal
-    if (isSpeaking()) {
+    const pending = cancelPendingStart();
+    if (isSpeaking() || isNarrationStarting() || pending) {
       event.preventDefault();
       stop('user');
       setMessage('Reading stopped', { tone: 'muted', ttl: 1500 });
@@ -257,9 +258,11 @@ function onKeyDown(event) {
     event.preventDefault();
     const state = toggleNarration();
     if (state === 'paused') {
-      setMessage('Paused — press Space to continue', { tone: 'accent', ttl: 2500 });
+      setMessage('Paused - press Space to continue', { tone: 'accent', ttl: 2500 });
+    } else if (state === 'empty') {
+      setMessage('Nothing to read', { tone: 'muted', ttl: 2000 });
     } else {
-      setMessage('Reading…', { tone: 'accent', ttl: 1500 });
+      setMessage('Reading.', { tone: 'accent', ttl: 1500 });
     }
     return;
   }

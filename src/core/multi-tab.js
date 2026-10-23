@@ -3,8 +3,9 @@
  * CROSS-TAB COORDINATION
  * ============================================================================
  * Several tabs of the app can be open at once - the reader pastes a different
- * document into each. They share one set of speakers, so narration is a
- * single-tab affair: the tab that starts speaking asks the others to pause.
+ * document into each. They share one set of speakers; the reader can switch
+ * on "Pause narration in other tabs" to have a tab that starts speaking ask
+ * the others to pause. By default every tab reads on its own.
  *
  * `BroadcastChannel` is used where it exists (Edge, Chrome, Firefox); a
  * `localStorage` ping is the fallback for browsers without it.

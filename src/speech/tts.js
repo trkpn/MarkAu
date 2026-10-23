@@ -33,7 +33,7 @@
 
 import { getSettings } from '@/core/settings.js';
 import { announceNarrationStart, onOtherTabNarrationStart } from '@/core/multi-tab.js';
-import { TTS_WINDOW_CHARS } from '@/core/schedule.js';
+import { TTS_START_WINDOW_CHARS, TTS_WINDOW_CHARS } from '@/core/schedule.js';
 
 // Module-level persistent state (Immune to Garbage Collection)
 let speakDebounceTimer = null;
@@ -78,10 +78,14 @@ let windowStartBlock = 0;
 let windowEndBlock = -1;
 /** Whether blocks remain outside the current window. */
 let hasMoreSpeech = false;
+/** Whether the current token table covers the whole document. */
+let tokensCoverDocument = false;
 /** A cheap approximation of the whole document's word count. */
 let estimatedTotalWords = 0;
 /** The DOM walk behind the estimate, made once per document change. */
 let cachedWordEstimate = 0;
+/** The estimate supplied by the preview, from the Markdown source. */
+let documentWordEstimate = 0;
 
 // Active settings
 let currentVoice = null;
@@ -252,6 +256,20 @@ export function setScrollContainer(el) {
 export function setPreviewContainer(el) {
   previewContainerRef = el || null;
   cachedWordEstimate = 0;
+  documentWordEstimate = 0;
+}
+
+/**
+ * Gives the narrator a word-count estimate without walking the preview.
+ *
+ * The preview knows the length of the Markdown it rendered; reading every
+ * word of a book-sized DOM on the first Play would block the page.
+ *
+ * @param {number} words
+ */
+export function setSpeechWordEstimate(words) {
+  const value = Number(words);
+  documentWordEstimate = Number.isFinite(value) && value > 0 ? Math.ceil(value) : 0;
 }
 
 /**
@@ -476,13 +494,17 @@ function tokenizeDOMForTTS(
   const targets = blocks && blocks.length > 0 ? blocks : [rootContainer];
 
   if (!append) {
-    if (blocks && previousTokenized.size > 0) {
+    if (!blocks) {
+      // A full pass owns the whole container and may be replacing an older
+      // full pass.
+      unwrapTokenSpans(rootContainer);
+    } else if (previousTokenized.size > 0) {
       previousTokenized.forEach((node) => {
         if (node?.isConnected) unwrapTokenSpans(node);
       });
-    } else {
-      unwrapTokenSpans(rootContainer);
     }
+    // With no previous window there are no wrappers to remove; querying the
+    // whole preview here only made the first Play slower.
   } else {
     targets.forEach((target) => unwrapTokenSpans(target));
   }
@@ -617,8 +639,7 @@ function tokenizeDOMForTTS(
         if (seg.isWordLike) {
           hasTokens = true;
           const wordId = wordCounter++;
-          const span = document.createElement('span');
-          span.className = 'tts-word';
+          const span = createWordElement(textNode);
           span.setAttribute('data-word-id', wordId.toString());
           span.textContent = segText;
           fragment.appendChild(span);
@@ -649,6 +670,16 @@ function tokenizeDOMForTTS(
 
   if (!append) {
     estimatedTotalWords = blocks ? Math.max(totalWords, tokens.length) : 0;
+
+    if (!blocks) {
+      // A full pass covers every block: the start window can use it as it is.
+      tokensCoverDocument = true;
+      windowStartBlock = 0;
+      windowEndBlock = -1;
+      hasMoreSpeech = false;
+    } else {
+      tokensCoverDocument = false;
+    }
   } else if (totalWords > 0) {
     estimatedTotalWords = Math.max(estimatedTotalWords, totalWords);
   }
@@ -659,12 +690,30 @@ function tokenizeDOMForTTS(
 }
 
 /**
+ * Creates the wrapper for one spoken word.
+ *
+ * Text inside a diagram is SVG; an HTML span would not render there, so the
+ * wrapper follows the namespace of the text it replaces.
+ *
+ * @param {Node} textNode
+ * @returns {Element}
+ */
+function createWordElement(textNode) {
+  const inSvg = textNode.parentElement?.namespaceURI === 'http://www.w3.org/2000/svg';
+  const word = inSvg
+    ? document.createElementNS('http://www.w3.org/2000/svg', 'tspan')
+    : document.createElement('span');
+  word.setAttribute('class', 'tts-word');
+  return word;
+}
+
+/**
  * Removes the previously injected word wrappers so tokenization stays
  * idempotent — without this a second pass would nest spans inside spans.
  * @param {HTMLElement} root
  */
 function unwrapTokenSpans(root) {
-  const spans = root.querySelectorAll('span.tts-word:not(.tts-math-token)');
+  const spans = root.querySelectorAll('span.tts-word:not(.tts-math-token), tspan.tts-word');
   spans.forEach((span) => {
     span.replaceWith(document.createTextNode(span.textContent));
   });
@@ -688,8 +737,12 @@ export function ensureTokens() {
  */
 function isSpeakableBlock(node) {
   if (!(node instanceof HTMLElement)) return false;
-  if (!node.textContent || !node.textContent.trim()) return false;
-  if (node.matches('hr, script, style, .heading-anchor')) return false;
+
+  // Do not read the text of every block here. The first Play calls this over
+  // the whole preview; walking the text of a book at that moment is what made
+  // the click feel like a hang. Empty blocks are harmless - the tokenizer
+  // simply produces no word for them.
+  if (node.matches('hr, script, style, template, .heading-anchor')) return false;
   return true;
 }
 
@@ -705,6 +758,45 @@ function collectSpeechBlocks(root) {
 }
 
 /**
+ * The number of characters a top-level block would contribute to speech.
+ *
+ * Used for the start window and for the empty-document guard only; it stops
+ * at the first readable block, so a book is not walked twice.
+ *
+ * @param {HTMLElement} node
+ * @returns {number}
+ */
+function readableChars(node) {
+  if (!node) return 0;
+
+  // A diagram's labels are words only when the reader asked for them. The
+  // hidden source of the diagram must not make the block look readable.
+  if (node.matches?.('.mermaid-block') && !getSettings().readDiagramLabels) return 0;
+
+  const text = node.textContent || '';
+  return text.trim() ? text.length : 0;
+}
+
+/**
+ * Tells whether a top-level block holds text the narrator could read.
+ * @param {HTMLElement} node
+ * @returns {boolean}
+ */
+function hasReadableText(node) {
+  return readableChars(node) > 0;
+}
+
+/**
+ * Whether the rendered preview has at least one block the narrator can read.
+ *
+ * @returns {boolean}
+ */
+export function hasSpeechContent() {
+  if (!previewContainerRef) return false;
+  return collectSpeechBlocks(previewContainerRef).some(hasReadableText);
+}
+
+/**
  * A cheap estimate of the whole document's word count.
  *
  * The exact number is only known after the document has been tokenized. The
@@ -715,6 +807,10 @@ function collectSpeechBlocks(root) {
  * @returns {number}
  */
 function estimateWordCount(root) {
+  // The preview supplies the estimate from the Markdown source, so the first
+  // Play does not have to read the text of the whole DOM.
+  if (documentWordEstimate > 0) return documentWordEstimate;
+
   // Reading the text of the whole preview for every window would defeat the
   // windowing itself. The document changes only when the tokens are marked
   // stale, so the walk is made once per version.
@@ -761,6 +857,41 @@ function chooseWindowEnd(start) {
 }
 
 /**
+ * Chooses a small first window so the click is answered quickly.
+ *
+ * The window grows on its own once the voice is speaking; tokenizing a large
+ * part of the page before the first syllable is what made the first Play
+ * feel like a hang.
+ *
+ * @param {number} start
+ * @returns {number}
+ */
+function chooseStartWindowEnd(start) {
+  let end = start;
+  let chars = 0;
+  let readable = 0;
+
+  while (end < speechBlocks.length) {
+    const charsInBlock = readableChars(speechBlocks[end]);
+    if (charsInBlock > 0) {
+      readable += 1;
+      chars += charsInBlock;
+    }
+    end += 1;
+
+    // A few short blocks are still cheaper than one more large paragraph.
+    if (readable >= 2 && chars >= TTS_START_WINDOW_CHARS) break;
+    if (readable >= 6) break;
+
+    // A run of images or diagrams must not make the first window scan a
+    // whole gallery; the next attempt continues after it.
+    if (end - start >= 48) break;
+  }
+
+  return Math.min(speechBlocks.length, Math.max(start + 1, end));
+}
+
+/**
  * Tokenizes a window of blocks, replacing the current token table.
  *
  * @param {number} start
@@ -770,6 +901,7 @@ function resetTokenWindow(start, end) {
   windowStartBlock = Math.max(0, start);
   windowEndBlock = Math.min(speechBlocks.length, end);
   hasMoreSpeech = windowEndBlock < speechBlocks.length;
+  tokensCoverDocument = false;
 
   tokenizeDOMForTTS(previewContainerRef, documentLocale, {
     blocks: speechBlocks.slice(windowStartBlock, windowEndBlock),
@@ -792,39 +924,109 @@ function ensureTokenWindowAt(element) {
   let index = blockIndexForElement(element);
   if (index < 0) index = 0;
 
-  resetTokenWindow(index, chooseWindowEnd(index));
+  resetTokenWindow(index, chooseStartWindowEnd(index));
   return tokens.length > 0;
+}
+
+/**
+ * The index of the first speech block the reader can see.
+ * @returns {number}
+ */
+function visibleSpeechBlockIndex() {
+  if (speechBlocks.length === 0) return 0;
+
+  const scroller = scrollContainerRef;
+  if (!scroller || typeof scroller.getBoundingClientRect !== 'function') return 0;
+  if (!scroller.clientHeight) return 0;
+
+  const top = scroller.getBoundingClientRect().top + 48;
+  let low = 0;
+  let high = speechBlocks.length - 1;
+  let index = 0;
+
+  // The blocks are in document order, so the last one whose top is above
+  // the viewport is the block the reader is looking at. A binary search
+  // keeps a jump to the end of a book from measuring every block.
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (speechBlocks[middle].getBoundingClientRect().top <= top) {
+      index = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  return index;
 }
 
 /**
  * Starts the window at the first block the reader can see.
  *
+ * A window that was prepared on idle is reused only while it still covers
+ * that block; after a scroll the narrator must not start from a stale place.
+ *
  * @returns {boolean} whether a token was produced
  */
 function ensureStartWindow() {
   if (!previewContainerRef) return false;
-  if (!tokensAreStale && tokens.length > 0) return true;
+  if (!tokensAreStale && tokens.length > 0 && tokensCoverDocument) return true;
 
   speechBlocks = collectSpeechBlocks(previewContainerRef);
   if (speechBlocks.length === 0) return false;
 
-  let index = 0;
-  const scroller = scrollContainerRef;
+  let index = visibleSpeechBlockIndex();
 
-  if (scroller && typeof scroller.getBoundingClientRect === 'function') {
-    const top = scroller.getBoundingClientRect().top + 48;
+  // A window that still covers the visible block is valid: after a pause it
+  // is the table the engine is reading, and replacing it would move the words
+  // under the running audio.
+  if (!tokensAreStale && tokens.length > 0 && index >= windowStartBlock && index < windowEndBlock) {
+    return true;
+  }
 
-    for (let block = 0; block < speechBlocks.length; block += 1) {
-      const rect = speechBlocks[block].getBoundingClientRect();
-      if (rect.bottom > top) {
-        index = block;
-        break;
-      }
-    }
+  // The visible block may be an image, a diagram or a rule. Advance until a
+  // window actually produces words instead of failing silently.
+  for (let attempt = 0; attempt < 8 && index < speechBlocks.length; attempt += 1) {
+    resetTokenWindow(index, chooseStartWindowEnd(index));
+    if (tokens.length > 0) return true;
+    if (windowEndBlock <= index) break;
+    index = windowEndBlock;
+  }
+
+  return tokens.length > 0;
+}
+
+/**
+ * Prepares the first speech window while the page is idle.
+ *
+ * The tokenization is then already done when the reader presses Play, so the
+ * first click does not have to pay for it. If the reader scrolled in the
+ * meantime, `ensureStartWindow` notices and rebuilds the window.
+ */
+export function prepareSpeechWindow() {
+  if (!previewContainerRef) return;
+  if (isPlaying || isPaused || isStarting) return;
+
+  speechBlocks = collectSpeechBlocks(previewContainerRef);
+  if (speechBlocks.length === 0) return;
+
+  if (!tokensAreStale && tokens.length > 0 && tokensCoverDocument) return;
+
+  const index = visibleSpeechBlockIndex();
+
+  // Keep the existing window while it still covers the viewport: the hover
+  // wrappers are already there, and re-wrapping on every small scroll would
+  // only churn the DOM.
+  if (
+    !tokensAreStale &&
+    tokens.length > 0 &&
+    index >= windowStartBlock &&
+    index < windowEndBlock
+  ) {
+    return;
   }
 
   resetTokenWindow(index, chooseWindowEnd(index));
-  return tokens.length > 0;
 }
 
 /**
@@ -921,6 +1123,7 @@ export function markTokensStale(reason = 'content-changed') {
   windowStartBlock = 0;
   windowEndBlock = -1;
   hasMoreSpeech = false;
+  tokensCoverDocument = false;
   estimatedTotalWords = 0;
   cachedWordEstimate = 0;
   if (isPlaying || isPaused) {
@@ -1349,7 +1552,8 @@ function speakFromWord(wordIndex = 0) {
   clearPumpTimer();
   chunkRetries = 0;
   lastEventAt = Date.now();
-  announceNarrationStart();
+  // The cross-tab hand-shake is optional.
+  if (getSettings().pauseOtherTabs) announceNarrationStart();
 
   if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
     window.speechSynthesis.cancel();
@@ -1390,11 +1594,44 @@ function speakFromWord(wordIndex = 0) {
  * Play or Resume audio reading.
  */
 export function play() {
-  if (!('speechSynthesis' in window)) return;
+  if (!('speechSynthesis' in window)) return false;
 
-  // Tell the UI *before* the heavy work starts. Tokenizing a large document
-  // can take a moment, and without feedback the button looks unresponsive.
-  if (!isPlaying && !isPaused) {
+  // Resuming a pause does not need the token table: the engine is still
+  // holding the utterance. Re-tokenizing here would move the words under the
+  // running audio.
+  if (isPaused) {
+    const api = window.speechSynthesis;
+    // The paused utterance may have been dropped by the browser — only trust
+    // the API when it really is still holding the speech.
+    if (api.paused) {
+      // Taking the reading back means the other tab has to let go, when the
+      // reader asked for the cross-tab hand-shake.
+      if (getSettings().pauseOtherTabs) announceNarrationStart();
+      api.resume();
+      lastEventAt = Date.now();
+      isPaused = false;
+      isPlaying = true;
+      isStarting = false;
+      notifyState({ isPlaying: true, isPaused: false, starting: false });
+      return true;
+    }
+    // Otherwise fall through and re-speak from the current word.
+    isPaused = false;
+  }
+
+  if (!isPlaying) {
+    // Nothing to read is not a "starting" state. Do not flash the player when
+    // the reader clicks empty space in an empty document.
+    if (!hasSpeechContent()) {
+      if (isStarting) {
+        isStarting = false;
+        notifyState({ starting: false });
+      }
+      return false;
+    }
+
+    // Tell the UI *before* the heavy work starts. Tokenizing a large document
+    // can take a moment, and without feedback the button looks unresponsive.
     isStarting = true;
     notifyState({ starting: true });
   }
@@ -1402,26 +1639,7 @@ export function play() {
   if (!ensureStartWindow()) {
     isStarting = false;
     notifyState({ starting: false });
-    return;
-  }
-
-  if (isPaused) {
-    const api = window.speechSynthesis;
-    // The paused utterance may have been dropped by the browser — only trust
-    // the API when it really is still holding the speech.
-    if (api.paused) {
-      // Taking the reading back means the other tab has to let go.
-      announceNarrationStart();
-      api.resume();
-      lastEventAt = Date.now();
-      isPaused = false;
-      isPlaying = true;
-      isStarting = false;
-      notifyState({ isPlaying: true, isPaused: false, starting: false });
-      return;
-    }
-    // Otherwise fall through and re-speak from the current word.
-    isPaused = false;
+    return false;
   }
 
   if (isPlaying) {
@@ -1433,15 +1651,16 @@ export function play() {
     if (api.speaking || api.pending) {
       isStarting = false;
       notifyState({ starting: false });
-      return;
+      return true;
     }
     speakFromWord(Math.max(0, currentWordIndex));
-    return;
+    return true;
   }
 
   const startIndex = currentWordIndex >= 0 ? currentWordIndex : 0;
   restartAttempts = 0;
   speakFromWord(startIndex);
+  return true;
 }
 
 /**
@@ -1461,6 +1680,9 @@ export function pause() {
  * is kept: the reader can press Play again in this tab to take over.
  */
 function pauseForOtherTab() {
+  // The hand-shake is opt-in: without the setting, another tab starting to
+  // read does not pause this one.
+  if (getSettings().pauseOtherTabs !== true) return;
   if (!isPlaying || isPaused) return;
   window.speechSynthesis.pause();
   isPaused = true;

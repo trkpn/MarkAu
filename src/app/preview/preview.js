@@ -25,15 +25,19 @@ import { detectLanguage } from '@/core/language.js';
 import { renderMermaidDiagrams, handleDiagramAction } from '@/markdown/mermaid.js';
 import {
   setDocumentLocale,
+  setSpeechWordEstimate,
   markTokensStale,
   setScrollContainer,
   setPreviewContainer,
   setAutoScrollEnabled,
+  isNarrationStarting,
   isSpeaking,
   isSpeechPaused,
+  wasRecentlyAutoScrolling,
   handlePreviewClick,
   onTTSStateChange,
-  appendSpeechBlocks
+  appendSpeechBlocks,
+  prepareSpeechWindow
 } from '@/speech/tts.js';
 import { setSTTLocale } from '@/speech/stt.js';
 import { getSettings, onSettingsChange } from '@/core/settings.js';
@@ -51,6 +55,12 @@ let lastRenderedText = null;
 let renderCompleted = false;
 let totalSourceLines = 1;
 let editPatchTimer = null;
+/** Cached editor line height and padding; invalidated on layout changes. */
+let editorMetrics = null;
+/** The idle callback that prepares the first speech window. */
+let speechPrepareHandle = null;
+/** The debounce before a scroll prepares the visible speech window. */
+let speechPrepareTimer = null;
 /** The render environment of the whole document, for fragment patches. */
 let lastRenderEnv = {};
 
@@ -77,6 +87,87 @@ let followSuspended = false;
  */
 function applyFollowSetting() {
   setAutoScrollEnabled(getSettings().followWhileReading && !followSuspended);
+}
+
+/**
+ * Cancels a pending preparation of the visible speech window.
+ */
+function cancelSpeechPreparation() {
+  if (speechPrepareTimer !== null) {
+    clearTimeout(speechPrepareTimer);
+    speechPrepareTimer = null;
+  }
+
+  if (speechPrepareHandle !== null) {
+    if (typeof cancelIdleCallback === 'function') cancelIdleCallback(speechPrepareHandle);
+    speechPrepareHandle = null;
+  }
+}
+
+/**
+ * Prepares the speech window for whatever the reader is looking at.
+ */
+function prepareVisibleWindow() {
+  if (!isPreviewCurrent()) return;
+  if (isSpeaking() || isSpeechPaused() || isNarrationStarting()) return;
+
+  // Wrapping words while the reader is selecting text would break the
+  // selection under their hand.
+  const selection = typeof window.getSelection === 'function' ? window.getSelection() : null;
+  if (
+    selection &&
+    !selection.isCollapsed &&
+    selection.anchorNode &&
+    el.preview.contains(selection.anchorNode)
+  ) {
+    return;
+  }
+
+  prepareSpeechWindow();
+}
+
+/**
+ * Tokenizes the first speech window while the page is idle.
+ *
+ * The first Play should answer the click immediately, not spend it wrapping
+ * a screenful of words. If the reader moves before pressing Play, the
+ * narrator notices that the prepared window no longer covers the visible
+ * block and rebuilds it.
+ */
+function scheduleSpeechPreparation() {
+  cancelSpeechPreparation();
+
+  if (typeof requestIdleCallback === 'function') {
+    speechPrepareHandle = requestIdleCallback(prepareVisibleWindow, { timeout: 1500 });
+    return;
+  }
+
+  // Safari has no idle callback; a short timer still moves the work out of
+  // the render path.
+  speechPrepareTimer = setTimeout(() => {
+    speechPrepareTimer = null;
+    prepareVisibleWindow();
+  }, 200);
+}
+
+/**
+ * Prepares the window the reader scrolled to.
+ *
+ * The hover effect and click-to-read both need the `.tts-word` wrappers, so
+ * the visible block is tokenized shortly after scrolling stops. The work is
+ * debounced and kept out of the scroll itself.
+ */
+function scheduleVisiblePreparation() {
+  if (isSpeaking() || isSpeechPaused() || isNarrationStarting()) return;
+
+  cancelSpeechPreparation();
+  speechPrepareTimer = setTimeout(() => {
+    speechPrepareTimer = null;
+    // The window is small and the scroll has stopped; doing it here is more
+    // predictable than waiting for an idle callback that may be delayed by
+    // other work.
+    prepareVisibleWindow();
+  }, 160);
 }
 
 /* ==========================================================================
@@ -126,6 +217,13 @@ export function flushRender({ force = false, reason = lastReason } = {}) {
 export function isPreviewCurrent() {
   if (!el.preview || !el.previewWrapper) return false;
   return !currentRender && renderCompleted && lastRenderedText === el.editor.value;
+}
+
+/**
+ * @returns {boolean} whether the editor holds any text at all
+ */
+export function hasDocumentContent() {
+  return Boolean(el.editor?.value?.trim());
 }
 
 /**
@@ -243,11 +341,16 @@ function renderNow(reason, { force = false } = {}) {
   }
 
   cancelRender();
+  cancelSpeechPreparation();
   markTokensStale(reason);
+  setSpeechWordEstimate(Math.max(1, Math.ceil(markdownText.length / 6)));
 
   // The language belongs to the document, not to the last chunk of it: the
-  // narrator may start as soon as the first block is on the page.
-  const locale = detectLanguage(markdownText);
+  // narrator may start as soon as the first block is on the page. A sample
+  // is enough for detection and keeps a book from being scanned twice.
+  const languageSample =
+    markdownText.length > 60_000 ? markdownText.slice(0, 60_000) : markdownText;
+  const locale = detectLanguage(languageSample);
   setSTTLocale(locale);
   setDocumentLocale(locale);
   lastRenderEnv = {};
@@ -270,10 +373,19 @@ function renderNow(reason, { force = false } = {}) {
   renderCompleted = false;
 
   job.promise = (async () => {
+    // Give the browser a chance to paint "Starting…" (and to answer the
+    // click that started this render) before a book-sized parse takes the
+    // main thread.
+    if (markdownText.length > LARGE_DOC_CHARS) {
+      await yieldToMainThread();
+      if (job.cancelled || job.id !== renderSequence) return;
+    }
+
     const { tokens, env } = parseMarkdownDocument(markdownText);
     const groups = groupMarkdownTokens(tokens);
     lastRenderEnv = env;
     totalSourceLines = markdownText ? markdownText.split('\n').length : 1;
+    editorMetrics = null;
 
     el.preview.dispatchEvent(
       new CustomEvent('preview:render-start', {
@@ -300,7 +412,9 @@ function renderNow(reason, { force = false } = {}) {
         added.push(addedNode);
         addedNode = addedNode.nextElementSibling;
       }
-      if (isSpeaking() || isSpeechPaused()) appendSpeechBlocks(added);
+      if (isSpeaking() || isSpeechPaused() || isNarrationStarting()) {
+        appendSpeechBlocks(added);
+      }
       const newBlocks = added.flatMap((node) =>
         node.matches?.('.mermaid-block') ? [node] : Array.from(node.querySelectorAll?.('.mermaid-block') || [])
       );
@@ -353,8 +467,16 @@ function renderNow(reason, { force = false } = {}) {
     if (restoreSourceLine !== null) {
       tryRestoreSourceLine();
       restoreSourceLine = null;
+      scheduleSpeechPreparation();
     } else if (!positionRestored) {
-      setTimeout(restorePosition, 60);
+      // Prepare the first speech window after the saved reading position has
+      // been applied, or the prepared window would belong to the top.
+      setTimeout(() => {
+        restorePosition();
+        scheduleSpeechPreparation();
+      }, 60);
+    } else {
+      scheduleSpeechPreparation();
     }
 
     el.preview.dispatchEvent(new CustomEvent('preview:rendered'));
@@ -369,6 +491,9 @@ function renderNow(reason, { force = false } = {}) {
       renderCompleted = true;
       lastRenderedText = null;
     }
+    // A render that failed will never reach the requested line. Release the
+    // waiters so a pending Play does not stay in "starting" forever.
+    resolveWaiters(job, true);
     console.error('Preview render failed:', err);
   });
 }
@@ -457,6 +582,8 @@ function anchorTarget(node) {
  */
 export function patchPreviewLines(startLine, endLine) {
   if (!el.preview || !el.previewWrapper) return false;
+  cancelSpeechPreparation();
+
   if (!renderCompleted || !lastRenderedText) {
     scheduleRender('translated');
     return false;
@@ -552,12 +679,14 @@ export function patchPreviewLines(startLine, endLine) {
   anchorsDirty = true;
   rebuildAnchorCache();
 
+  const estimate = Math.max(1, Math.ceil(text.length / 6));
+  setSpeechWordEstimate(estimate);
   if (el.activeTokenInfo) {
-    const estimate = Math.max(1, Math.ceil(text.length / 6));
     el.activeTokenInfo.textContent = `~${estimate} words`;
   }
 
   el.preview.dispatchEvent(new CustomEvent('preview:rendered'));
+  scheduleSpeechPreparation();
   return patched;
 }
 
@@ -579,8 +708,16 @@ export function patchPreviewLines(startLine, endLine) {
  * panes into a feedback loop.
  */
 function scrollPane(node, key, top) {
+  const max = Math.max(0, node.scrollHeight - node.clientHeight);
+  const target = Math.min(max, Math.max(0, top));
+
+  // Assigning the value the pane already has does not fire a scroll event;
+  // marking the pane as suppressed in that case would swallow the next real
+  // user scroll instead.
+  if (Math.abs(node.scrollTop - target) < 1) return;
+
   suppressScroll[key] = true;
-  node.scrollTop = top;
+  node.scrollTop = target;
 }
 
 const suppressScroll = { editor: false, preview: false };
@@ -697,14 +834,31 @@ export function getVisibleSourceRange() {
 }
 
 /**
- * The height of one editor line in pixels.
- * @returns {number}
+ * The height of one editor line in pixels, and the top padding.
+ *
+ * The values are read from the computed style once and reused for every
+ * scroll frame. Reading them on each scroll event forces a style/layout pass
+ * on a pane that is being scrolled, which is visible as judder.
+ *
+ * @returns {{ lineHeight: number, padding: number }}
  */
-function getEditorLineHeight() {
-  const lineHeight = Number.parseFloat(getComputedStyle(el.editor).lineHeight);
-  if (Number.isFinite(lineHeight) && lineHeight > 0) return lineHeight;
+function getEditorMetrics() {
+  if (editorMetrics) return editorMetrics;
+
+  const style = getComputedStyle(el.editor);
+  const lineHeight = Number.parseFloat(style.lineHeight);
+  const padding = Number.parseFloat(style.paddingTop) || 0;
+
+  if (Number.isFinite(lineHeight) && lineHeight > 0) {
+    editorMetrics = { lineHeight, padding };
+    return editorMetrics;
+  }
+
   const total = totalSourceLines;
-  return total > 0 ? (el.editor.scrollHeight - 32) / total : 20;
+  return {
+    lineHeight: total > 0 ? (el.editor.scrollHeight - 32) / total : 20,
+    padding
+  };
 }
 
 /**
@@ -712,8 +866,7 @@ function getEditorLineHeight() {
  * @returns {number}
  */
 function getEditorTopLine() {
-  const lineHeight = getEditorLineHeight();
-  const padding = Number.parseFloat(getComputedStyle(el.editor).paddingTop) || 0;
+  const { lineHeight, padding } = getEditorMetrics();
   return Math.floor(Math.max(0, el.editor.scrollTop - padding) / lineHeight) + 1;
 }
 
@@ -722,8 +875,7 @@ function getEditorTopLine() {
  * @param {number} line
  */
 function scrollEditorToLine(line) {
-  const lineHeight = getEditorLineHeight();
-  const padding = Number.parseFloat(getComputedStyle(el.editor).paddingTop) || 0;
+  const { lineHeight, padding } = getEditorMetrics();
   scrollPane(el.editor, 'editor', Math.max(0, (line - 1) * lineHeight + padding));
   el.lineNumbers.scrollTop = el.editor.scrollTop;
 }
@@ -811,6 +963,11 @@ function tryRestoreSourceLine() {
 
 /**
  * Wires the synchronized scrolling with a precise echo detection.
+ *
+ * Scroll events fire far more often than the screen is painted. The work for
+ * one event - a binary search over the anchors, layout reads and a write to
+ * the other pane - is therefore coalesced into one animation frame, so the
+ * scroll of the pane under the reader's hand stays smooth.
  */
 function initSyncScroll() {
   // A real gesture always wins over a pending programmatic scroll.
@@ -818,12 +975,14 @@ function initSyncScroll() {
     suppressScroll[key] = false;
   };
 
-  const handleScroll = (key, node) => {
-    if (suppressScroll[key]) {
-      // This is the echo of our own programmatic scroll.
-      suppressScroll[key] = false;
-      return;
-    }
+  const pending = { editor: false, preview: false };
+  const frame =
+    typeof requestAnimationFrame === 'function'
+      ? (callback) => requestAnimationFrame(callback)
+      : (callback) => setTimeout(callback, 16);
+
+  const handleScroll = (key) => {
+    const node = key === 'editor' ? el.editor : el.previewWrapper;
 
     if (key === 'editor') {
       el.lineNumbers.scrollTop = el.editor.scrollTop;
@@ -832,10 +991,6 @@ function initSyncScroll() {
     const mode = getSettings().syncMode;
     if (mode === 'off') return;
 
-    // The update happens synchronously: deferring it to the next animation
-    // frame adds a visible lag and would not run at all in a tab that is not
-    // being painted. The echo detection above already prevents a feedback
-    // loop.
     if (mode === 'line') {
       if (key === 'editor') {
         scrollPreviewToLine(getEditorTopLine());
@@ -846,33 +1001,61 @@ function initSyncScroll() {
     }
 
     // Proportional scrolling
-    const max =
-      key === 'editor'
-        ? el.editor.scrollHeight - el.editor.clientHeight
-        : el.previewWrapper.scrollHeight - el.previewWrapper.clientHeight;
-
-    if (max <= 0) return;
-    const ratio = node.scrollTop / max;
-
     const editorMax = el.editor.scrollHeight - el.editor.clientHeight;
     const previewMax = el.previewWrapper.scrollHeight - el.previewWrapper.clientHeight;
 
     if (key === 'editor') {
-      if (previewMax > 0) scrollPane(el.previewWrapper, 'preview', ratio * previewMax);
-    } else if (editorMax > 0) {
+      if (editorMax <= 0) return;
+      if (previewMax > 0) {
+        scrollPane(el.previewWrapper, 'preview', (node.scrollTop / editorMax) * previewMax);
+      }
+    } else if (previewMax > 0 && editorMax > 0) {
+      const ratio = node.scrollTop / previewMax;
       scrollPane(el.editor, 'editor', ratio * editorMax);
       el.lineNumbers.scrollTop = el.editor.scrollTop;
     }
   };
 
-  el.editor.addEventListener('scroll', () => handleScroll('editor', el.editor), { passive: true });
-  el.previewWrapper.addEventListener('scroll', () => handleScroll('preview', el.previewWrapper), {
-    passive: true
-  });
+  const schedule = (key) => {
+    if (pending[key]) return;
+    pending[key] = true;
+
+    frame(() => {
+      pending[key] = false;
+      handleScroll(key);
+    });
+  };
+
+  const onScroll = (key) => {
+    if (suppressScroll[key]) {
+      // This is the echo of our own programmatic scroll. Leave the flag set
+      // for the other scroll listeners of this event (the reading-position
+      // listener reads the same flag), then clear it before the next event.
+      if (typeof queueMicrotask === 'function') {
+        queueMicrotask(() => {
+          suppressScroll[key] = false;
+        });
+      } else {
+        setTimeout(() => {
+          suppressScroll[key] = false;
+        }, 0);
+      }
+      return;
+    }
+
+    schedule(key);
+  };
+
+  el.editor.addEventListener('scroll', () => onScroll('editor'), { passive: true });
+  el.previewWrapper.addEventListener('scroll', () => onScroll('preview'), { passive: true });
 
   ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach((type) => {
     el.editor.addEventListener(type, releaseSuppression('editor'), { passive: true });
     el.previewWrapper.addEventListener(type, releaseSuppression('preview'), { passive: true });
+  });
+
+  window.addEventListener('resize', () => {
+    editorMetrics = null;
   });
 }
 
@@ -1141,8 +1324,12 @@ export function initPreview() {
     scheduleRender(reason);
   });
 
-  // The "follow the narration" preference applies immediately
-  onSettingsChange(() => applyFollowSetting());
+  // The "follow the narration" preference applies immediately; a font or
+  // layout change also invalidates the cached editor metrics.
+  onSettingsChange(() => {
+    editorMetrics = null;
+    applyFollowSetting();
+  });
 
   // A deferred render (narration was running) is flushed once playback ends.
   onTTSStateChange(({ isPlaying }) => {
@@ -1178,12 +1365,20 @@ export function initPreview() {
   el.previewWrapper.addEventListener(
     'scroll',
     () => {
+      // The words under the new viewport need their wrappers for the hover
+      // effect and for click-to-read. The tokenizer is debounced and runs
+      // only when nothing is being spoken.
+      scheduleVisiblePreparation();
+
       if (suppressScroll.preview) return; // our own scroll
 
       // A genuine gesture means the reader has moved on — stop restoring.
       positionRestored = true;
       schedulePositionSave();
 
+      // The narrator's own smooth scroll must not be mistaken for the reader
+      // taking over, or every spoken word would pause the follow.
+      if (wasRecentlyAutoScrolling()) return;
       if (followSuspended) return;
       if (!isSpeaking() && !isSpeechPaused()) return;
 
@@ -1194,6 +1389,10 @@ export function initPreview() {
     { passive: true }
   );
   window.addEventListener('beforeunload', savePosition);
+
+  // A pointer entering the preview is a good sign that the reader wants to
+  // hover or click a word: make sure that part of the text has its wrappers.
+  el.preview.addEventListener('pointerenter', scheduleVisiblePreparation, { passive: true });
 
   el.preview.addEventListener('click', (event) => {
     // The tools around a diagram handle their own clicks.
@@ -1245,9 +1444,11 @@ export function initPreview() {
     // the reading starts, pauses and resumes again.
     const state = toggleNarration();
     if (state === 'paused') {
-      setMessage('Paused — press Space to continue', { tone: 'accent', ttl: 2500 });
+      setMessage('Paused - press Space to continue', { tone: 'accent', ttl: 2500 });
+    } else if (state === 'empty') {
+      setMessage('Nothing to read', { tone: 'muted', ttl: 2000 });
     } else {
-      setMessage('Reading…', { tone: 'accent', ttl: 1500 });
+      setMessage('Reading.', { tone: 'accent', ttl: 1500 });
     }
   });
 
