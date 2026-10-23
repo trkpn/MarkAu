@@ -105,63 +105,45 @@ available under **Preferences → Shortcuts**.
 ```
 src/
 ├── main.js                 # Bootstrap: wires the modules together
-├── style.css               # Tailwind v4 entry point (@theme tokens, layers)
-├── settings-manager.js     # Persisted preferences — single source of truth
-├── version-history.js      # The versions of the document — kept in the browser
-├── markdown-parser.js      # Markdown → sanitized HTML (KaTeX, Highlight.js, DOMPurify)
-├── mermaid-renderer.js     # Mermaid diagrams — loaded on demand, drawn into the preview
-├── html-to-markdown.js     # Web page → Markdown (Readability + Turndown) — loaded on demand
-├── youtube-to-markdown.js  # A video — its details, description, chapters, transcript
-├── substack-to-markdown.js # A post — its body, and where the paywall begins
-├── reddit-to-markdown.js   # A thread — the post and the comments
-├── arxiv-to-markdown.js    # A paper — its metadata, its abstract, its formulas
-├── pdf-to-markdown.js      # A PDF — the text of the pages (pdf.js)
-├── epub-to-markdown.js     # A book — its chapters (EPUB is a bundle of pages)
-├── frontmatter.js          # The YAML-ish block that may open a document
-├── translation.js          # Markdown → a plan the translator can carry out → Markdown
-├── translation-languages.js # The languages the document can be translated into
-├── translation-provider.js # The talk with the translator — runs on the server and in the browser
-├── tts-engine.js           # Speech synthesis, word highlighting, playback watchdog
-├── multi-tab.js            # The cross-tab hand-shake: one tab reads, the others pause
-├── language-detect.js      # Which language the document is written in (script + words)
-├── stt-engine.js           # Speech recognition (dictation)
-├── icons.js                # Inline SVG icons
-├── sample-markdown.js      # Built-in sample document
-└── app/
-    ├── document-title.js   # The document's name in the tab, and the reading marker
-    ├── new-tab.js          # A second tab, with an empty document for the next article
-    ├── dom.js              # Element registry + icon injection
-    ├── status.js           # Footer status manager (base message + timed override)
-    ├── layout.js           # View switcher, panel arrangement, draggable splitter
-    ├── toolbar.js          # Single-row toolbar that sheds controls by importance
-    ├── shortcuts.js        # Keyboard shortcuts
-    ├── mini-player.js      # Floating reading controls
-    ├── outline.js          # Document outline (table of contents) + breadcrumb
-    ├── editor.js           # Buffer, draft persistence, paste detection, file handling
-    ├── paste.js            # A pasted text becomes the document (button, shortcut, drop)
-    ├── drag-drop.js        # A file, an address or a piece of text, dropped on the app
-    ├── url-import.js       # Import a document from a web address
-    ├── url-sources.js      # What a URL points at — GitHub, Hugging Face, YouTube, Substack, Reddit, file, page
-    ├── translate.js        # Translate the document into another language
-    ├── history.js          # The versions of the document: when they are taken, what the user does with them
-    ├── print.js            # Printing and PDF export of the rendered document
-    ├── preview.js          # Render pipeline, lazy tokenization, sync scrolling
-    ├── controls.js         # Playback, voice, dictation, theme, network, PWA
-    ├── narration.js        # Play / pause — one place for every gesture
-    ├── voices.js           # The voice list of the browser, sorted into groups
-    ├── settings-modal.js   # Preferences
-    └── dialog.js           # In-app confirmation dialog
+├── app/                    # UI and feature controllers
+│   ├── shell/              # dom, status, layout, toolbar, controls, shortcuts, dialog
+│   ├── editor/             # editor, paste, document-title, new-tab, print
+│   ├── preview/            # preview, outline, narration, mini-player
+│   ├── import/             # url-import, sources, drag-drop
+│   ├── history/            # the version-history dialog
+│   ├── settings/           # preferences modal
+│   └── translate/          # the translation dialog
+├── core/                   # settings, history store, multi-tab, frontmatter, language
+├── markdown/               # parser (KaTeX, Highlight.js, DOMPurify) and Mermaid
+├── speech/                 # TTS, STT, voice grouping
+├── translation/            # pipeline, provider, languages
+├── importers/              # html, youtube, substack, reddit, arxiv, pdf, epub
+├── ui/                     # inline SVG icons
+├── content/                # built-in sample document
+└── styles/                 # Tailwind v4 entry point (@theme tokens, layers)
+
 server/
 ├── proxy-core.js           # The proxy that reads pages the browser may not read
 ├── youtube-transcript.js   # The transcript of a video, read on the server
 └── translate-core.js       # The translation, read on the server
+
 functions/
-└── api/
-    ├── fetch.js            # Cloudflare Pages Function — mounts the proxy at /api/fetch
-    ├── youtube-transcript.js  # …and the transcript at /api/youtube-transcript
-    └── translate.js        # …and the translation at /api/translate
-tests/                      # Vitest unit tests for the pure logic
+└── api/                    # Cloudflare Pages Function routes for the server cores
+
+tests/                      # Vitest unit tests, grouped to mirror src/
+├── app/                    # UI/feature controllers
+├── core/                   # settings, history, multi-tab, language
+├── markdown/               # parser and Mermaid
+├── speech/                 # TTS, STT, voices
+├── translation/            # pipeline, provider, app dialog
+├── importers/              # document readers and drag/drop
+├── server/                 # proxy and translation cores
+└── helpers.js              # shared browser stubs
 ```
+
+The browser code and the tests import through the `@/` alias, which points at
+`src/`. The server cores and the Cloudflare functions keep relative imports,
+because Cloudflare does not resolve Vite aliases.
 
 ### Reading a page from the web
 

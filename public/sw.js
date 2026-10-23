@@ -26,16 +26,16 @@ const STATIC_ASSETS = [
   '/index.html',
   '/manifest.json',
   '/src/main.js',
-  '/src/style.css',
-  '/src/icons.js',
-  '/src/markdown-parser.js',
-  '/src/tts-engine.js',
-  '/src/stt-engine.js',
-  '/src/settings-manager.js',
-  '/src/sample-markdown.js',
-  '/src/translation.js',
-  '/src/translation-languages.js',
-  '/src/translation-provider.js'
+  '/src/styles/style.css',
+  '/src/ui/icons.js',
+  '/src/markdown/parser.js',
+  '/src/speech/tts.js',
+  '/src/speech/stt.js',
+  '/src/core/settings.js',
+  '/src/content/sample.js',
+  '/src/translation/pipeline.js',
+  '/src/translation/languages.js',
+  '/src/translation/provider.js'
 ];
 
 /** How long the network may delay a navigation before the cache is used. */

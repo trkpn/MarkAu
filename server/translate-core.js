@@ -17,9 +17,9 @@
  * ============================================================================
  */
 
-import { TranslateError, assertTarget, translateUnits } from '../src/translation-provider.js';
+import { TranslateError, assertTarget, translateUnits } from '../src/translation/provider.js';
 
-export { TranslateError, assertTarget, translateUnits } from '../src/translation-provider.js';
+export { TranslateError, assertTarget, translateUnits } from '../src/translation/provider.js';
 
 /**
  * Handles a request to the translator and answers with a JSON envelope.

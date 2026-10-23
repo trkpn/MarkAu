@@ -18,7 +18,7 @@
  * ============================================================================
  */
 
-import { parseCaptionTrack } from '../src/youtube-to-markdown.js';
+import { parseCaptionTrack } from '../src/importers/youtube.js';
 
 /** The voice the players of the app for Android use. */
 const ANDROID_CLIENT = {

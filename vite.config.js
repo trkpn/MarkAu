@@ -173,6 +173,11 @@ function devProxyPlugin() {
 }
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, 'src')
+    }
+  },
   plugins: [tailwindcss(), swPrecachePlugin(), devProxyPlugin()],
   server: {
     port: 5173,

@@ -7,33 +7,33 @@
  * Everything runs locally in the browser: no server, no network fonts.
  *
  * Module map:
- *   settings-manager.js  — persisted preferences (single source of truth)
- *   markdown-parser.js    — Markdown → sanitized HTML
- *   tts-engine.js         — speech synthesis + word highlighting
- *   multi-tab.js          — one tab narrates at a time
- *   stt-engine.js         — speech recognition (dictation)
- *   app/dom.js            — element registry + icon injection
- *   app/status.js         — footer status manager
- *   app/layout.js         — view switcher, panel arrangement, splitter
- *   app/editor.js         — buffer, draft persistence, replacement detection
- *   app/preview.js        — render pipeline, tokenization, sync scrolling
- *   app/controls.js       — header controls
- *   app/paste.js          — clipboard paste
- *   app/url-import.js     — import a document from a web address
- *   app/translate.js      — translate the document into another language
- *   app/history.js        — the versions of the document, kept in the browser
- *   app/new-tab.js        — a second tab, with a copy of the document
- *   app/document-title.js — the document's name in the browser tab
- *   app/settings-modal.js — preferences
- *   app/dialog.js         — in-app confirmation dialog
+ *   core/settings.js          — persisted preferences (single source of truth)
+ *   markdown/parser.js        — Markdown → sanitized HTML
+ *   speech/tts.js             — speech synthesis + word highlighting
+ *   core/multi-tab.js         — one tab narrates at a time
+ *   speech/stt.js             — speech recognition (dictation)
+ *   app/shell/dom.js          — element registry + icon injection
+ *   app/shell/status.js       — footer status manager
+ *   app/shell/layout.js       — view switcher, panel arrangement, splitter
+ *   app/editor/editor.js      — buffer, draft persistence, replacement detection
+ *   app/preview/preview.js    — render pipeline, tokenization, sync scrolling
+ *   app/shell/controls.js     — header controls
+ *   app/editor/paste.js       — clipboard paste
+ *   app/import/url-import.js  — import a document from a web address
+ *   app/translate/translate.js — translate the document into another language
+ *   app/history/dialog.js     — the versions of the document, kept in the browser
+ *   app/editor/new-tab.js     — a second tab, with a copy of the document
+ *   app/editor/document-title.js — the document's name in the browser tab
+ *   app/settings/modal.js     — preferences
+ *   app/shell/dialog.js       — in-app confirmation dialog
  * ============================================================================
  */
 
-import { loadSettings } from './settings-manager.js';
-import { injectIcons, el } from './app/dom.js';
-import { initStatus, setMessage } from './app/status.js';
-import { initLayout } from './app/layout.js';
-import { initToolbar, refreshToolbarDensity } from './app/toolbar.js';
+import { loadSettings } from '@/core/settings.js';
+import { injectIcons, el } from '@/app/shell/dom.js';
+import { initStatus, setMessage } from '@/app/shell/status.js';
+import { initLayout } from '@/app/shell/layout.js';
+import { initToolbar, refreshToolbarDensity } from '@/app/shell/toolbar.js';
 import {
   initEditor,
   setMarkdown,
@@ -41,23 +41,23 @@ import {
   hasTabDraft,
   startBlankTab,
   onContentChange
-} from './app/editor.js';
-import { initPreview, forgetTabPosition } from './app/preview.js';
-import { initControls } from './app/controls.js';
-import { initPaste } from './app/paste.js';
-import { initUrlImport } from './app/url-import.js';
-import { initTranslate } from './app/translate.js';
-import { initHistory } from './app/history.js';
-import { initDragDrop } from './app/drag-drop.js';
-import { initShortcuts } from './app/shortcuts.js';
-import { initNewTab } from './app/new-tab.js';
-import { initDocumentTitle } from './app/document-title.js';
-import { initMiniPlayer } from './app/mini-player.js';
-import { initOutline, rebuildOutline } from './app/outline.js';
-import { initSettingsModal } from './app/settings-modal.js';
-import { confirmDialog } from './app/dialog.js';
-import { defaultMarkdown } from './sample-markdown.js';
-import { isAnotherTabOpen } from './multi-tab.js';
+} from '@/app/editor/editor.js';
+import { initPreview, forgetTabPosition } from '@/app/preview/preview.js';
+import { initControls } from '@/app/shell/controls.js';
+import { initPaste } from '@/app/editor/paste.js';
+import { initUrlImport } from '@/app/import/url-import.js';
+import { initTranslate } from '@/app/translate/translate.js';
+import { initHistory } from '@/app/history/dialog.js';
+import { initDragDrop } from '@/app/import/drag-drop.js';
+import { initShortcuts } from '@/app/shell/shortcuts.js';
+import { initNewTab } from '@/app/editor/new-tab.js';
+import { initDocumentTitle } from '@/app/editor/document-title.js';
+import { initMiniPlayer } from '@/app/preview/mini-player.js';
+import { initOutline, rebuildOutline } from '@/app/preview/outline.js';
+import { initSettingsModal } from '@/app/settings/modal.js';
+import { confirmDialog } from '@/app/shell/dialog.js';
+import { defaultMarkdown } from '@/content/sample.js';
+import { isAnotherTabOpen } from '@/core/multi-tab.js';
 
 /* ==========================================================================
  * Document level actions
