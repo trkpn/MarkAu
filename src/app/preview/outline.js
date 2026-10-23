@@ -15,8 +15,6 @@ import { speakFromElement } from '@/speech/tts.js';
 import { jumpToLine } from '@/app/preview/preview.js';
 import { setMessage } from '@/app/shell/status.js';
 
-const HEADING_TAGS = ['H1', 'H2', 'H3'];
-
 /** The headings of the current document. */
 let headings = [];
 let rebuildTimer = null;
@@ -26,15 +24,15 @@ let rebuildTimer = null;
  * @returns {Array<{ el: HTMLElement, line: number, level: number, text: string }>}
  */
 function readHeadings() {
-  const nodes = Array.from(el.preview.querySelectorAll('[data-line]'));
-  return nodes
-    .filter((node) => HEADING_TAGS.includes(node.tagName))
-    .map((node) => ({
-      el: node,
-      line: Number(node.dataset.line) || 1,
-      level: Number(node.tagName.slice(1)),
-      text: node.textContent.trim() || 'Untitled'
-    }));
+  const nodes = Array.from(
+    el.preview.querySelectorAll('h1[data-line], h2[data-line], h3[data-line]')
+  );
+  return nodes.map((node) => ({
+    el: node,
+    line: Number(node.dataset.line) || 1,
+    level: Number(node.tagName.slice(1)),
+    text: node.textContent.trim() || 'Untitled'
+  }));
 }
 
 /**
@@ -121,17 +119,27 @@ function toggleOutline() {
  * @returns {object|null}
  */
 function currentHeading() {
-  const nodes = Array.from(el.preview.querySelectorAll('[data-line]')).filter((node) =>
-    HEADING_TAGS.includes(node.tagName)
+  const nodes = Array.from(
+    el.preview.querySelectorAll('h1[data-line], h2[data-line], h3[data-line]')
   );
   if (nodes.length === 0) return null;
 
   const scrollerTop = el.previewWrapper.scrollTop;
-  let current = nodes[0];
-  for (const node of nodes) {
-    if (node.offsetTop <= scrollerTop + 24) current = node;
-    else break;
+  let low = 0;
+  let high = nodes.length - 1;
+  let index = 0;
+
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (nodes[middle].offsetTop <= scrollerTop + 24) {
+      index = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
   }
+
+  const current = nodes[index];
   return { el: current, text: current.textContent.trim() };
 }
 
@@ -177,6 +185,7 @@ export function initOutline() {
   // The preview replaces its content on every render, so the heading list
   // has to be rebuilt from the fresh DOM.
   el.preview?.addEventListener('preview:rendered', rebuildOutline);
+  el.preview?.addEventListener('preview:chunk', rebuildOutline);
 
   rebuildOutline();
 }

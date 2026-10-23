@@ -38,6 +38,7 @@ import {
   initEditor,
   setMarkdown,
   loadDraft,
+  loadDraftAsync,
   hasTabDraft,
   startBlankTab,
   onContentChange
@@ -48,6 +49,7 @@ import { initPaste } from '@/app/editor/paste.js';
 import { initUrlImport } from '@/app/import/url-import.js';
 import { initTranslate } from '@/app/translate/translate.js';
 import { initHistory } from '@/app/history/dialog.js';
+import { initHistoryStorage } from '@/core/history.js';
 import { initDragDrop } from '@/app/import/drag-drop.js';
 import { initShortcuts } from '@/app/shell/shortcuts.js';
 import { initNewTab } from '@/app/editor/new-tab.js';
@@ -134,7 +136,7 @@ async function initApp() {
 
   // An empty draft of this tab is a real answer - the document was cleared
   // on purpose - so only a tab with no draft at all starts from the sample.
-  const draft = startFresh ? '' : loadDraft();
+  const draft = startFresh ? '' : await loadDraftAsync(loadDraft());
   const hasDraft = startFresh || hasTabDraft();
 
   initLayout();
@@ -151,6 +153,7 @@ async function initApp() {
   initPaste();
   initUrlImport();
   initTranslate();
+  await initHistoryStorage();
   initHistory();
   initDragDrop();
   initShortcuts();

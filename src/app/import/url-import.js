@@ -22,10 +22,29 @@ import { setMarkdown } from '@/app/editor/editor.js';
 import { getSettings } from '@/core/settings.js';
 import { setMessage } from '@/app/shell/status.js';
 import { detectSource, decodeBase64Utf8, SOURCE } from '@/app/import/sources.js';
+import {
+  beginImport,
+  cancelImport,
+  currentImportKind,
+  endImport,
+  isCurrentImport,
+  showImportProgress
+} from '@/app/import/import-job.js';
 
 const GITHUB_API = 'https://api.github.com';
 const RAW_GITHUB = 'https://raw.githubusercontent.com';
 const HUGGING_FACE = 'https://huggingface.co';
+
+/** The job the network helpers belong to. */
+let activeJob = null;
+
+/**
+ * The signal of the import that is running.
+ * @returns {AbortSignal|undefined}
+ */
+function importSignal() {
+  return activeJob?.signal;
+}
 
 /** The proxy that ships with the app. It is on the same origin. */
 const PROXY_ENDPOINT = '/api/fetch';
@@ -63,7 +82,7 @@ export class ImportError extends Error {
 async function fetchText(url, options = {}) {
   let response;
   try {
-    response = await fetch(url, options);
+    response = await fetch(url, { signal: importSignal(), ...options });
   } catch {
     throw new ImportError('That address could not be reached.');
   }
@@ -112,7 +131,7 @@ export function isTextual(contentType) {
   const type = String(contentType).toLowerCase();
 
   const certainlyBinary =
-    /^(application\/(pdf|zip|octet-stream|epub\+zip|msword|rtf|x-tar|x-gzip|x-7z-compressed)|image\/(?!svg)|video\/|audio\/|font\/)/;
+    /^(application\/(pdf|zip|octet-stream|epub\+zip|msword|wordprocessingml|vnd\.ms-word|vnd\.openxmlformats|rtf|x-tar|x-gzip|x-7z-compressed)|image\/(?!svg)|video\/|audio\/|font\/)/;
 
   return !certainlyBinary.test(type);
 }
@@ -125,7 +144,7 @@ export function isTextual(contentType) {
  */
 async function fetchHtml(url) {
   try {
-    const response = await fetch(url, { redirect: 'follow' });
+    const response = await fetch(url, { redirect: 'follow', signal: importSignal() });
     if (response.ok) {
       const type = response.headers.get('content-type') || '';
       if (!isTextual(type)) {
@@ -135,9 +154,9 @@ async function fetchHtml(url) {
     }
   } catch (err) {
     // The page does not allow a direct read — the proxy will have to. But
-    // an answer that is not text is an answer that is not worth asking
-    // for again.
-    if (err instanceof ImportError) throw err;
+    // an answer that is not text is an answer that is not worth asking for
+    // again, and a cancelled import is not an error to fall back from.
+    if (err instanceof ImportError || err?.name === 'AbortError') throw err;
   }
 
   const proxied = await fetchViaProxy(url);
@@ -169,7 +188,7 @@ async function fetchGithubReadme(source) {
 
   let response;
   try {
-    response = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
+    response = await fetch(url, { headers: { Accept: 'application/vnd.github+json' }, signal: importSignal() });
   } catch {
     throw new ImportError('GitHub could not be reached.');
   }
@@ -230,7 +249,7 @@ async function fetchHuggingFaceCard(source) {
 
   let response;
   try {
-    response = await fetch(url);
+    response = await fetch(url, { signal: importSignal() });
   } catch {
     throw new ImportError('Hugging Face could not be reached.');
   }
@@ -318,7 +337,9 @@ async function fetchYoutubeVideo(source) {
   // transcript is fetched by the server, because the address of the player
   // of YouTube does not allow a call from a browser.
   try {
-    const response = await fetch(`/api/youtube-transcript?id=${source.videoId}`);
+    const response = await fetch(`/api/youtube-transcript?id=${source.videoId}`, {
+      signal: importSignal()
+    });
     const payload = await response.json();
 
     if (payload.ok && Array.isArray(payload.lines) && payload.lines.length > 0) {
@@ -640,7 +661,9 @@ async function fetchArxivPaper(source) {
   let paperFromPdf = false;
 
   try {
-    const response = await fetch(`https://arxiv.org/html/${source.paperId}`);
+    const response = await fetch(`https://arxiv.org/html/${source.paperId}`, {
+      signal: importSignal()
+    });
 
     if (response.ok) {
       const html = await response.text();
@@ -667,7 +690,10 @@ async function fetchArxivPaper(source) {
     try {
       const { pdfToMarkdown } = await import('@/importers/pdf.js');
       const { bytes } = await fetchBinary(`https://arxiv.org/pdf/${source.paperId}`);
-      const pdf = await pdfToMarkdown(bytes, { url: `https://arxiv.org/pdf/${source.paperId}` });
+      const pdf = await pdfToMarkdown(bytes, {
+        url: `https://arxiv.org/pdf/${source.paperId}`,
+        signal: importSignal()
+      });
 
       if (pdf.markdown) {
         paperMarkdown = pdf.markdown;
@@ -709,8 +735,49 @@ async function fetchArxivPaper(source) {
 }
 
 /* ==========================================================================
- * PDF and books
+ * PDF, books and Word documents
  * ========================================================================== */
+
+/**
+ * Reads a response body as bytes, reporting progress when the browser exposes
+ * a stream.
+ *
+ * @param {Response} response
+ * @returns {Promise<Uint8Array>}
+ */
+async function readResponseBytes(response) {
+  const declared = Number(response.headers?.get?.('content-length')) || 0;
+
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+
+    showImportProgress(activeJob, {
+      phase: 'downloading',
+      done: received,
+      total: declared || 0
+    });
+  }
+
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  return bytes;
+}
 
 /**
  * Fetches a file of bytes.
@@ -722,19 +789,19 @@ async function fetchArxivPaper(source) {
  */
 async function fetchBinary(url) {
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: importSignal() });
     if (response.ok) {
       const type = response.headers.get('content-type') || '';
-      if (!/pdf|epub|octet-stream|zip/i.test(type)) {
+      if (!/pdf|epub|docx|wordprocessingml|msword|ms-word|octet-stream|zip/i.test(type)) {
         throw new ImportError('That address is not a file of this kind.');
       }
       return {
-        bytes: new Uint8Array(await response.arrayBuffer()),
+        bytes: await readResponseBytes(response),
         finalUrl: response.url || url
       };
     }
   } catch (err) {
-    if (err instanceof ImportError) throw err;
+    if (err instanceof ImportError || err?.name === 'AbortError') throw err;
   }
 
   const proxied = await fetchViaProxy(url);
@@ -759,7 +826,11 @@ async function fetchPdfDocument(source) {
   const { pdfToMarkdown, buildPdfDocument } = await import('@/importers/pdf.js');
 
   const { bytes, finalUrl } = await fetchBinary(source.url);
-  const pdf = await pdfToMarkdown(bytes, { url: finalUrl });
+  const pdf = await pdfToMarkdown(bytes, {
+    url: finalUrl,
+    signal: importSignal(),
+    onProgress: (progress) => showImportProgress(activeJob, progress)
+  });
 
   return {
     markdown: buildPdfDocument(pdf, finalUrl),
@@ -785,7 +856,13 @@ async function fetchEpubBook(source) {
   try {
     book = await epubToMarkdown(bytes, {
       url: finalUrl,
-      toMarkdown: (html, baseUrl) => htmlToMarkdownFragment(html, baseUrl)
+      signal: importSignal(),
+      onProgress: (progress) => showImportProgress(activeJob, progress),
+      toMarkdown: (html, baseUrl) =>
+        htmlToMarkdownFragment(html, baseUrl, {
+          signal: importSignal(),
+          onProgress: (progress) => showImportProgress(activeJob, progress)
+        })
     });
   } catch (err) {
     throw new ImportError(err instanceof Error ? err.message : 'That book could not be read.');
@@ -796,6 +873,36 @@ async function fetchEpubBook(source) {
     title: book.title,
     sourceUrl: finalUrl,
     note: `book (${book.chapters} chapters)`
+  };
+}
+
+/**
+ * Reads a Word document.
+ *
+ * @param {object} source
+ * @returns {Promise<{ markdown: string, title: string, sourceUrl: string, note: string }>}
+ */
+async function fetchDocxDocument(source) {
+  const { docxToMarkdown } = await import('@/importers/docx.js');
+
+  const { bytes, finalUrl } = await fetchBinary(source.url);
+
+  let docx;
+  try {
+    docx = await docxToMarkdown(bytes, {
+      url: finalUrl,
+      signal: importSignal(),
+      onProgress: (progress) => showImportProgress(activeJob, progress)
+    });
+  } catch (err) {
+    throw new ImportError(err instanceof Error ? err.message : 'That document could not be read.');
+  }
+
+  return {
+    markdown: docx.markdown,
+    title: docx.title,
+    sourceUrl: finalUrl,
+    note: `Word document (${docx.paragraphs} paragraphs)`
   };
 }
 
@@ -812,7 +919,9 @@ async function fetchEpubBook(source) {
 async function fetchViaProxy(url) {
   let response;
   try {
-    response = await fetch(`${PROXY_ENDPOINT}?url=${encodeURIComponent(url)}`);
+    response = await fetch(`${PROXY_ENDPOINT}?url=${encodeURIComponent(url)}`, {
+      signal: importSignal()
+    });
   } catch {
     throw new ImportError('The proxy of the app could not be reached.');
   }
@@ -853,7 +962,7 @@ async function fetchViaReaderFallback(url) {
 
   let response;
   try {
-    response = await fetch(`${READER_FALLBACK}${url}`, { headers });
+    response = await fetch(`${READER_FALLBACK}${url}`, { headers, signal: importSignal() });
   } catch {
     throw new ImportError('The fallback reader could not be reached.');
   }
@@ -961,7 +1070,10 @@ async function fetchWebPage(source) {
  */
 async function convertHtml(html, pageUrl) {
   const { htmlToMarkdown } = await import('@/importers/html.js');
-  return htmlToMarkdown(html, pageUrl);
+  return htmlToMarkdown(html, pageUrl, {
+    signal: importSignal(),
+    onProgress: (progress) => showImportProgress(activeJob, progress)
+  });
 }
 
 /* ==========================================================================
@@ -1108,6 +1220,8 @@ export async function importFromUrl(input) {
       return fetchPdfDocument(source);
     case SOURCE.EPUB_BOOK:
       return fetchEpubBook(source);
+    case SOURCE.DOCX_DOCUMENT:
+      return fetchDocxDocument(source);
     default:
       return fetchWebPage(source);
   }
@@ -1126,12 +1240,17 @@ export async function runImport(input) {
     return false;
   }
 
+  const job = beginImport('Importing', 'url');
+  activeJob = job;
   setBusy(true);
   setMessage('Fetching…', { tone: 'muted' });
 
   try {
     const result = await importFromUrl(value);
+    if (!isCurrentImport(job)) return false;
+
     const markdown = buildDocument(result);
+    if (!isCurrentImport(job)) return false;
 
     // An import brings in a document, so it becomes the document. It is
     // not a piece of text that is put somewhere in the text that is
@@ -1146,6 +1265,10 @@ export async function runImport(input) {
     });
     return true;
   } catch (err) {
+    if (err?.name === 'AbortError' || !isCurrentImport(job)) {
+      return false;
+    }
+
     if (!(err instanceof ImportError)) {
       // Something unexpected went wrong. The reason is worth knowing, and
       // it is worth telling — a silent "it did not work" helps nobody.
@@ -1160,7 +1283,15 @@ export async function runImport(input) {
     setMessage(message, { tone: 'warn', ttl: 5000 });
     return false;
   } finally {
-    setBusy(false);
+    const wasCurrent = endImport(job);
+    if (activeJob === job) activeJob = null;
+
+    // A document opened from the picker or a drop cancels this job but does
+    // not own the URL dialog's busy state: it has to be cleared here. A newer
+    // URL import owns it and will clear it when it is done.
+    if (wasCurrent || currentImportKind() !== 'url') {
+      setBusy(false);
+    }
   }
 }
 
@@ -1214,7 +1345,13 @@ function setBusy(busy) {
 export function initUrlImport() {
   el.btnImportUrl?.addEventListener('click', openDialog);
   el.btnCloseUrlImport?.addEventListener('click', closeDialog);
-  el.btnUrlImportCancel?.addEventListener('click', closeDialog);
+  el.btnUrlImportCancel?.addEventListener('click', () => {
+    // Keep `activeJob` pointing at the aborted job while it unwinds: every
+    // later fetch and every conversion reads the signal from it and stops.
+    cancelImport('url');
+    setBusy(false);
+    closeDialog();
+  });
 
   el.modalUrlImport?.addEventListener('click', (event) => {
     if (event.target === el.modalUrlImport) closeDialog();

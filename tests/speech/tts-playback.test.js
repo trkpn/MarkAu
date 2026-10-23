@@ -379,3 +379,79 @@ describe('narration that the browser drops', () => {
     expect(fakeSpeech.spoken[0].lang).toBe('th-TH');
   });
 });
+
+describe('windowed tokenization', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    document.body.innerHTML = '';
+    fakeSpeech.spoken = [];
+    fakeSpeech.speaking = false;
+    fakeSpeech.pending = false;
+    fakeSpeech.paused = false;
+    tts.setDocumentLocale('en-US');
+  });
+
+  afterEach(() => {
+    tts.stop();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('does not tokenize the whole document before playback starts', async () => {
+    const preview = document.createElement('div');
+    for (let index = 0; index < 300; index += 1) {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = `Paragraph ${index} carries enough words to make a speech block of its own.`;
+      preview.appendChild(paragraph);
+    }
+    document.body.appendChild(preview);
+
+    tts.setPreviewContainer(preview);
+    tts.markTokensStale('test');
+    tts.play();
+
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(preview.querySelectorAll('.tts-word').length).toBeGreaterThan(0);
+    expect(preview.lastElementChild.querySelector('.tts-word')).toBeNull();
+  });
+});
+
+describe('window extension', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    document.body.innerHTML = '';
+    fakeSpeech.spoken = [];
+    fakeSpeech.speaking = false;
+    fakeSpeech.pending = false;
+    fakeSpeech.paused = false;
+    tts.setDocumentLocale('en-US');
+  });
+
+  afterEach(() => {
+    tts.stop();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('reaches blocks beyond the first token window', async () => {
+    const preview = document.createElement('div');
+    for (let index = 0; index < 220; index += 1) {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = `Paragraph ${index} carries enough words to make a speech block of its own.`;
+      preview.appendChild(paragraph);
+    }
+    document.body.appendChild(preview);
+
+    tts.setPreviewContainer(preview);
+    tts.markTokensStale('test');
+    tts.play();
+    await vi.advanceTimersByTimeAsync(60);
+    await readEverything();
+
+    expect(fakeSpeech.spoken.length).toBeGreaterThan(4);
+    expect(preview.lastElementChild.querySelector('.tts-word')).not.toBeNull();
+  });
+});

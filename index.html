@@ -6,7 +6,7 @@
     <title>MarkAu — Markdown You Can Hear</title>
     <meta
       name="description"
-      content="MarkAu is an offline Markdown editor with a synchronized audio reader. Import a page, a video, a paper, a PDF or a book, translate it, and follow along word by word as it is read aloud."
+      content="MarkAu is an offline Markdown editor with a synchronized audio reader. Import a page, a video, a paper, a PDF, a book or a Word document, translate it, and follow along word by word as it is read aloud."
     />
     <meta property="og:title" content="MarkAu — Markdown You Can Hear" />
     <meta
@@ -381,7 +381,7 @@
           <input
             type="file"
             id="file-input"
-            accept=".md,.markdown,.txt,text/markdown,text/plain"
+            accept=".md,.markdown,.txt,.pdf,.epub,.docx,text/markdown,text/plain,application/pdf,application/epub+zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             hidden
           />
 
@@ -852,8 +852,8 @@
               />
               <p id="url-import-hint" class="hint-text">
                 A GitHub repository, a Hugging Face model, a YouTube video, a Substack post, a
-                Reddit thread, a PDF, a book, a Markdown file — or any article, which is reduced to
-                its main content. The import becomes the document.
+                Reddit thread, a PDF, a book, a Word document, a Markdown file — or any article,
+                which is reduced to its main content. The import becomes the document.
               </p>
               <p id="url-import-error" class="url-import-error" role="alert"></p>
               <div class="url-import-actions">
@@ -899,8 +899,9 @@
                 aria-describedby="translate-hint"
               ></select>
               <p id="translate-hint" class="hint-text">
-                The language the document is in is found on its own — only the language it should
-                end up in is asked for. Code, formulas and links are kept as they are.
+                The language the document is in is found on its own - only the language it should
+                end up in is asked for. Code, formulas and links are kept as they are. A long
+                document is translated as you scroll.
               </p>
               <p id="translate-scope" class="hint-text"></p>
               <p id="translate-error" class="url-import-error" role="alert"></p>

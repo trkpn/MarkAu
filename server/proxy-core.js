@@ -257,7 +257,7 @@ function isTextual(contentType) {
   const type = String(contentType).toLowerCase();
 
   const certainlyBinary =
-    /^(application\/(pdf|zip|octet-stream|epub\+zip|msword|rtf|x-tar|x-gzip|x-7z-compressed)|image\/(?!svg)|video\/|audio\/|font\/)/;
+    /^(application\/(pdf|zip|octet-stream|epub\+zip|msword|wordprocessingml|vnd\.ms-word|vnd\.openxmlformats|rtf|x-tar|x-gzip|x-7z-compressed)|image\/(?!svg)|video\/|audio\/|font\/)/;
 
   return !certainlyBinary.test(type);
 }

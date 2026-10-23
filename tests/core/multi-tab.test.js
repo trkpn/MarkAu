@@ -116,6 +116,28 @@ describe('documents in several tabs', () => {
 
     expect(editor.loadDraft()).toBe('A new article');
   });
+
+  it('restores the written draft of a deliberately new tab', async () => {
+    localStorage.setItem(RECOVERY_KEY, 'The last article');
+    editor.startBlankTab();
+    document.getElementById('editor').value = 'A new article';
+    editor.flushDraft();
+
+    // A new tab keeps `markdown_new_tab` until it has a draft. The draft
+    // must win over that marker once it exists.
+    expect(await editor.loadDraftAsync(editor.loadDraft())).toBe('A new article');
+  });
+
+  it('keeps a cleared new tab empty on the next open', async () => {
+    editor.startBlankTab();
+    document.getElementById('editor').value = 'A new article';
+    editor.flushDraft();
+
+    document.getElementById('editor').value = '';
+    editor.flushDraft();
+
+    expect(await editor.loadDraftAsync(editor.loadDraft())).toBe('');
+  });
 });
 
 describe('settings in several tabs', () => {

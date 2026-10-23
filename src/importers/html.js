@@ -20,8 +20,13 @@
  * ============================================================================
  */
 
+import { reportProgress, throwIfAborted, yieldToMainThread } from '@/core/schedule.js';
+
 /** Below this many characters a page is not treated as an article. */
 const ARTICLE_MIN_LENGTH = 400;
+
+/** Above this size a fragment is converted top-level block by top-level block. */
+const LARGE_FRAGMENT_CHARS = 250_000;
 
 /**
  * The loaded libraries, kept so the second import does not pay for them
@@ -171,6 +176,56 @@ function createTurndown({ TurndownService, gfm }, pageUrl) {
 }
 
 /**
+ * Converts a very large HTML fragment in top-level slices.
+ *
+ * Turndown itself is synchronous. A chapter that is one enormous wrapper
+ * still pays for that wrapper once, but the ordinary book chapter — many
+ * paragraphs, headings and lists — is cut into slices that yield to the
+ * browser between them.
+ *
+ * @param {object} turndown
+ * @param {string} html
+ * @param {object} [options]
+ * @param {AbortSignal} [options.signal]
+ * @param {(progress: { phase: string, done: number, total: number }) => void} [options.onProgress]
+ * @returns {Promise<string>}
+ */
+async function convertLargeFragment(turndown, html, { signal, onProgress } = {}) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const nodes = Array.from(doc.body?.childNodes || []);
+
+  if (nodes.length === 0) {
+    return tidy(turndown.turndown(html));
+  }
+
+  const pieces = [];
+
+  for (let index = 0; index < nodes.length; index += 1) {
+    throwIfAborted(signal);
+    const node = nodes[index];
+
+    if (node.nodeType === 1) {
+      pieces.push(turndown.turndown(node.outerHTML).trim());
+    } else if (node.nodeType === 3) {
+      // Bare text between top-level elements is still text of the article.
+      pieces.push(String(node.textContent || '').trim());
+    }
+
+    if (nodes.length > 20) {
+      reportProgress(onProgress, {
+        phase: 'converting',
+        done: index + 1,
+        total: nodes.length
+      });
+    }
+
+    await yieldToMainThread();
+  }
+
+  return tidy(pieces.filter(Boolean).join('\n\n'));
+}
+
+/**
  * Removes the parts of a page that never belong in a document.
  * @param {Document} doc
  */
@@ -193,18 +248,37 @@ function stripNoise(doc) {
  * @param {Array<{ key: string, filter: unknown, replacement: Function }>} [options.rules]
  *   extra rules for the converter — a site that carries its own marks can
  *   say what to do with them
+ * @param {(progress: { phase: string }) => void} [options.onProgress]
+ * @param {AbortSignal} [options.signal]
  * @returns {Promise<string>}
  */
-export async function htmlToMarkdownFragment(html, baseUrl, { rules = [] } = {}) {
+export async function htmlToMarkdownFragment(
+  html,
+  baseUrl,
+  { rules = [], onProgress, signal } = {}
+) {
   if (!html) return '';
+
+  throwIfAborted(signal);
+  reportProgress(onProgress, { phase: 'loading' });
+
   const libraries = await loadLibraries();
+  throwIfAborted(signal);
+  reportProgress(onProgress, { phase: 'converting' });
+
   const turndown = createTurndown(libraries, baseUrl);
 
   for (const rule of rules) {
     if (rule && rule.key) turndown.addRule(rule.key, rule);
   }
 
-  return tidy(turndown.turndown(html));
+  const markdown =
+    html.length >= LARGE_FRAGMENT_CHARS && rules.length === 0
+      ? await convertLargeFragment(turndown, html, { signal, onProgress })
+      : tidy(turndown.turndown(html));
+
+  throwIfAborted(signal);
+  return markdown;
 }
 
 /**
@@ -212,14 +286,22 @@ export async function htmlToMarkdownFragment(html, baseUrl, { rules = [] } = {})
  *
  * @param {string} html the raw HTML of the page
  * @param {string} pageUrl the address the HTML came from
+ * @param {object} [options]
+ * @param {(progress: { phase: string }) => void} [options.onProgress]
+ * @param {AbortSignal} [options.signal]
  * @returns {Promise<{ markdown: string, title: string, strategy: 'article'|'page' }>}
  */
-export async function htmlToMarkdown(html, pageUrl) {
+export async function htmlToMarkdown(html, pageUrl, { onProgress, signal } = {}) {
+  throwIfAborted(signal);
+  reportProgress(onProgress, { phase: 'loading' });
+
   const libraries = await loadLibraries();
   const { Readability } = libraries;
+  throwIfAborted(signal);
 
   // A document built by DOMParser is inert: nothing in it runs, and no
   // image inside it is fetched, until the nodes are moved into the page.
+  reportProgress(onProgress, { phase: 'reading' });
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
   // The base address makes every relative link inside the page absolute.
@@ -228,11 +310,13 @@ export async function htmlToMarkdown(html, pageUrl) {
   doc.head.prepend(base);
 
   stripNoise(doc);
+  throwIfAborted(signal);
 
   let markdown = '';
   let title = '';
   let strategy = 'page';
 
+  reportProgress(onProgress, { phase: 'extracting' });
   try {
     const article = new Readability(doc, {
       charThreshold: 250,
@@ -249,6 +333,7 @@ export async function htmlToMarkdown(html, pageUrl) {
   } catch (err) {
     console.warn('Readability could not parse the page:', err);
   }
+  throwIfAborted(signal);
 
   // A page that is not an article — a landing page, a feed — still has
   // something worth reading. The whole body is converted instead.
@@ -256,10 +341,16 @@ export async function htmlToMarkdown(html, pageUrl) {
     markdown = doc.body ? doc.body.innerHTML : '';
   }
 
+  reportProgress(onProgress, { phase: 'converting' });
   const turndown = createTurndown(libraries, pageUrl);
+  const converted =
+    markdown.length >= LARGE_FRAGMENT_CHARS
+      ? await convertLargeFragment(turndown, markdown, { signal, onProgress })
+      : tidy(turndown.turndown(markdown));
+  throwIfAborted(signal);
 
   return {
-    markdown: withTitle(tidy(turndown.turndown(markdown)), title),
+    markdown: withTitle(converted, title),
     title,
     strategy
   };

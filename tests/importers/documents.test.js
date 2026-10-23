@@ -185,6 +185,24 @@ describe('the proxy and the files that are not text', () => {
     expect(result.body).toBe('<html></html>');
   });
 
+  it('carries a Word document as base64', async () => {
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0xff, 0x00]);
+
+    const result = await fetchThroughProxy('https://example.com/a.docx', {
+      fetchImpl: async () =>
+        new Response(bytes, {
+          status: 200,
+          headers: {
+            'content-type':
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          }
+        })
+    });
+
+    expect(result.encoding).toBe('base64');
+    expect(Array.from(fromBase64(result.body))).toEqual(Array.from(bytes));
+  });
+
   it('carries a feed of arXiv as text, for it is a kind of xml', async () => {
     const result = await fetchThroughProxy('https://export.arxiv.org/api/query?id_list=1', {
       fetchImpl: async () =>

@@ -18,6 +18,8 @@
  * ============================================================================
  */
 
+import { reportProgress, throwIfAborted } from '@/core/schedule.js';
+
 /**
  * The reader of PDFs, loaded once.
  * @type {Promise<object>|null}
@@ -53,41 +55,68 @@ function loadPdfjs() {
  * @param {object} [options]
  * @param {string} [options.url] where the PDF came from
  * @param {number} [options.maxPages] how many pages to read
+ * @param {(progress: { phase: string, done: number, total: number }) => void} [options.onProgress]
+ * @param {AbortSignal} [options.signal]
  * @returns {Promise<{ markdown: string, title: string, pages: number }>}
  */
-export async function pdfToMarkdown(bytes, { url = '', maxPages = 0 } = {}) {
+export async function pdfToMarkdown(
+  bytes,
+  { url = '', maxPages = 0, onProgress, signal } = {}
+) {
+  throwIfAborted(signal);
+  reportProgress(onProgress, { phase: 'reading', done: 0, total: 1 });
+
   const pdfjs = await loadPdfjs();
+  throwIfAborted(signal);
 
   const document = await pdfjs.getDocument({ data: bytes }).promise;
-  const pages = document.numPages;
-  const limit = maxPages > 0 ? Math.min(pages, maxPages) : pages;
 
-  const info = await document.getMetadata().catch(() => null);
-  const title =
-    (info?.info?.Title || '').trim() || (info?.metadata?.title || '').trim() || nameFromUrl(url);
+  try {
+    const pages = document.numPages;
+    const limit = maxPages > 0 ? Math.min(pages, maxPages) : pages;
 
-  const lines = [];
-  const texts = [];
+    const info = await document.getMetadata().catch(() => null);
+    const title =
+      (info?.info?.Title || '').trim() || (info?.metadata?.title || '').trim() || nameFromUrl(url);
 
-  for (let page = 1; page <= limit; page += 1) {
-    const one = await document.getPage(page);
-    const content = await one.getTextContent();
+    const lines = [];
+    const texts = [];
 
-    const text = content.items
-      .map((item) => (typeof item.str === 'string' ? item.str : ''))
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    reportProgress(onProgress, { phase: 'extracting', done: 0, total: limit });
 
-    if (text) texts.push(text);
-    lines.push(`## Page ${page}`, '', text, '');
+    for (let page = 1; page <= limit; page += 1) {
+      throwIfAborted(signal);
+
+      const one = await document.getPage(page);
+      const content = await one.getTextContent();
+
+      const text = content.items
+        .map((item) => (typeof item.str === 'string' ? item.str : ''))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (text) texts.push(text);
+      lines.push(`## Page ${page}`, '', text, '');
+
+      reportProgress(onProgress, { phase: 'extracting', done: page, total: limit });
+    }
+
+    throwIfAborted(signal);
+
+    return {
+      markdown: lines.join('\n').trim(),
+      title,
+      pages
+    };
+  } finally {
+    // A cancelled import must not leave the PDF worker and its buffers alive.
+    try {
+      await document.destroy?.();
+    } catch {
+      /* the reader is gone already */
+    }
   }
-
-  return {
-    markdown: lines.join('\n').trim(),
-    title,
-    pages
-  };
 }
 
 /**

@@ -243,6 +243,14 @@ function handleContentChange({ reason }) {
   // instance. There is nothing to keep, and no capture to plan.
   if (current === lastSeenText) return;
 
+  // Lazy translation writes one window at a time. Capturing a version for
+  // every window would bury the history under the translation itself; the
+  // original is kept by the translator's own backup.
+  if (reason === 'translated') {
+    lastSeenText = current;
+    return;
+  }
+
   const enabled = historyEnabled();
 
   // The document was replaced: the text that was there is kept, so that

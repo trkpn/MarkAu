@@ -28,6 +28,20 @@ function tokenize(html) {
   return { tokens: ensureTokens(), preview };
 }
 
+/**
+ * Builds the markup the parser emits for inline math, including the KaTeX
+ * subtree whose text must never be read as prose.
+ *
+ * @param {string} formula
+ * @returns {string}
+ */
+function inlineMath(formula) {
+  return (
+    `<span class="katex-inline" data-math="true" data-formula="${formula}">` +
+    `<span class="katex"><span class="katex-mathml">${formula}</span></span></span>`
+  );
+}
+
 describe('the narration of a transcript', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -79,5 +93,46 @@ describe('the narration of a transcript', () => {
     const spoken = tokens.map((token) => token.text).join(' ');
 
     expect(spoken).toContain('evening');
+  });
+});
+
+describe('the narration of a formula', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('reads a formula where it appears in the document', () => {
+    // Every formula used to be tokenized before the prose, so narration
+    // began at a formula from the middle of the page and the highlight
+    // scrolled there first.
+    const { tokens } = tokenize(
+      `<p>Alpha ${inlineMath('a + b')} beta</p>` + `<p>Gamma ${inlineMath('c + d')} delta</p>`
+    );
+
+    expect(tokens.map((token) => token.text)).toEqual([
+      'Alpha',
+      'a + b',
+      'beta',
+      'Gamma',
+      'c + d',
+      'delta'
+    ]);
+  });
+
+  it('does not read the KaTeX markup of the formula', () => {
+    const { tokens } = tokenize(`<p>Value ${inlineMath('E = mc^2')} now</p>`);
+
+    const spoken = tokens.map((token) => token.text).join(' ');
+
+    expect(spoken).toContain('E = mc^2');
+    expect(spoken).not.toContain('katex');
+  });
+
+  it('gives the formula a single token that points at its element', () => {
+    const { tokens, preview } = tokenize(`<p>Value ${inlineMath('x')} now</p>`);
+
+    const formulaTokens = tokens.filter((token) => token.text === 'x');
+    expect(formulaTokens).toHaveLength(1);
+    expect(formulaTokens[0].element).toBe(preview.querySelector('[data-math="true"]'));
   });
 });

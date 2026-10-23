@@ -33,6 +33,7 @@ export const SOURCE = {
   ARXIV_PAPER: 'arxiv-paper',
   PDF_DOCUMENT: 'pdf-document',
   EPUB_BOOK: 'epub-book',
+  DOCX_DOCUMENT: 'docx-document',
   WEB_PAGE: 'web-page'
 };
 
@@ -132,6 +133,19 @@ export function normalizeUrl(input) {
 }
 
 /**
+ * Tells which kind of document an address names, from its extension.
+ *
+ * @param {string} pathname
+ * @returns {{ type: string, label: string }|null}
+ */
+function documentKind(pathname) {
+  if (/\.pdf$/i.test(pathname)) return { type: SOURCE.PDF_DOCUMENT, label: 'PDF document' };
+  if (/\.epub$/i.test(pathname)) return { type: SOURCE.EPUB_BOOK, label: 'EPUB book' };
+  if (/\.docx$/i.test(pathname)) return { type: SOURCE.DOCX_DOCUMENT, label: 'Word document' };
+  return null;
+}
+
+/**
  * Decides what a URL is.
  *
  * @param {string} input the URL as the user typed it
@@ -165,6 +179,18 @@ export function detectSource(input) {
     // A file inside the repository — the raw file is the content.
     if (kind === 'blob' && rest.length > 0) {
       const [ref, ...pathParts] = rest;
+      const path = pathParts.join('/');
+      const file = documentKind(path);
+
+      // A PDF, a book or a Word document is read as bytes, from the raw
+      // host; the page of the repository is not the document itself.
+      if (file) {
+        return {
+          ...file,
+          url: `https://raw.githubusercontent.com/${owner}/${repo}/${ref || 'HEAD'}/${path}`
+        };
+      }
+
       return {
         type: SOURCE.GITHUB_FILE,
         label: 'GitHub file',
@@ -172,7 +198,7 @@ export function detectSource(input) {
         owner,
         repo,
         ref: ref || 'HEAD',
-        path: pathParts.join('/')
+        path
       };
     }
 
@@ -190,6 +216,11 @@ export function detectSource(input) {
   if (host === 'huggingface.co') {
     const [head, ...tail] = segments;
     if (!head) return webPage(url);
+
+    // A resolve address serves the file itself, not the page of the
+    // repository: a PDF, a book or a Word document is taken from there.
+    const file = segments.includes('resolve') ? documentKind(url.pathname) : null;
+    if (file) return { ...file, url: url.href };
 
     const lowerHead = head.toLowerCase();
 
@@ -227,22 +258,9 @@ export function detectSource(input) {
     };
   }
 
-  /* ------------------------------------------------------ PDF and books */
-  if (/\.pdf$/i.test(url.pathname)) {
-    return {
-      type: SOURCE.PDF_DOCUMENT,
-      label: 'PDF document',
-      url: url.href
-    };
-  }
-
-  if (/\.epub$/i.test(url.pathname)) {
-    return {
-      type: SOURCE.EPUB_BOOK,
-      label: 'EPUB book',
-      url: url.href
-    };
-  }
+  /* ------------------------------------------- PDF, books and Word files */
+  const file = documentKind(url.pathname);
+  if (file) return { ...file, url: url.href };
 
   /* ----------------------------------------------------------- YouTube */
   if (host === 'youtu.be' || host === 'youtube.com' || host.endsWith('.youtube.com')) {

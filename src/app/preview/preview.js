@@ -7,19 +7,23 @@
  *   RENDER   — Markdown → sanitized HTML → preview DOM
  *   TOKENIZE — preview DOM → speakable words (only when they are needed)
  *
- * The old implementation tokenized the whole document on every keystroke,
- * which meant a large paste froze the main thread for seconds. Tokenization
- * is now lazy and idle-scheduled, and the preview is only rewritten when the
- * rendered HTML actually changed.
+ * The document is parsed once, then rendered in balanced top-level groups.
+ * The first groups reach the page before the rest of a book has been walked,
+ * and a large edit re-renders only the block it touched. Tokenization is
+ * windowed in the speech module, so no preview pass tokenizes a whole book.
  * ============================================================================
  */
 
 import { el } from '@/app/shell/dom.js';
-import { renderMarkdown } from '@/markdown/parser.js';
+import {
+  parseMarkdownDocument,
+  groupMarkdownTokens,
+  groupLineRange,
+  renderMarkdownGroup
+} from '@/markdown/parser.js';
 import { detectLanguage } from '@/core/language.js';
 import { renderMermaidDiagrams, handleDiagramAction } from '@/markdown/mermaid.js';
 import {
-  ensureTokens,
   setDocumentLocale,
   markTokensStale,
   setScrollContainer,
@@ -28,20 +32,34 @@ import {
   isSpeaking,
   isSpeechPaused,
   handlePreviewClick,
-  onTTSStateChange
+  onTTSStateChange,
+  appendSpeechBlocks
 } from '@/speech/tts.js';
 import { setSTTLocale } from '@/speech/stt.js';
 import { getSettings, onSettingsChange } from '@/core/settings.js';
-import { onContentChange } from '@/app/editor/editor.js';
+import { lineAtOffset, onContentChange } from '@/app/editor/editor.js';
 import { setMessage, clearMessage } from '@/app/shell/status.js';
 import { toggleNarration } from '@/app/preview/narration.js';
+import { LARGE_DOC_CHARS, yieldToMainThread } from '@/core/schedule.js';
 
 let renderTimer = null;
-let idleHandle = null;
-let idleUsesRaf = false;
-let lastHtml = '';
 let lastReason = 'edited';
 let pendingRender = null;
+let currentRender = null;
+let renderSequence = 0;
+let lastRenderedText = null;
+let renderCompleted = false;
+let totalSourceLines = 1;
+let editPatchTimer = null;
+/** The render environment of the whole document, for fragment patches. */
+let lastRenderEnv = {};
+
+/** The blocks of the preview that carry a source line, in document order. */
+let anchors = [];
+let anchorsDirty = true;
+
+/** The source line the reader was looking at before a re-render. */
+let restoreSourceLine = null;
 
 /**
  * The elements that count as "text" for the click gesture. A click inside
@@ -67,7 +85,7 @@ function applyFollowSetting() {
 
 /**
  * Schedules a render, scaled to the document size.
- * @param {'edited'|'replaced'} [reason]
+ * @param {'edited'|'replaced'|'translated'} [reason]
  */
 function scheduleRender(reason = 'edited') {
   lastReason = reason;
@@ -81,27 +99,112 @@ function scheduleRender(reason = 'edited') {
 
   renderTimer = setTimeout(() => {
     renderTimer = null;
-    renderNow(reason);
+    renderNow(reason).catch((err) => console.error('Preview render failed:', err));
   }, delay);
 }
 
 /**
- * Runs any pending render immediately (used before starting playback, so the
- * narrator never reads a document the editor has already replaced).
+ * Runs any pending render immediately.
+ *
+ * @param {object} [options]
+ * @param {boolean} [options.force] render even when the text did not change
+ * @param {'edited'|'replaced'|'translated'} [options.reason] the reason to
+ *   give the render; a setting change must not look like a new document
+ * @returns {Promise<void>}
  */
-export function flushRender() {
+export function flushRender({ force = false, reason = lastReason } = {}) {
   if (renderTimer) {
     clearTimeout(renderTimer);
     renderTimer = null;
   }
-  renderNow(lastReason);
+  return renderNow(reason, { force });
 }
 
 /**
- * Renders the current document into the preview.
- * @param {'edited'|'replaced'} reason
+ * @returns {boolean} whether the preview already shows the current text
  */
-function renderNow(reason) {
+export function isPreviewCurrent() {
+  if (!el.preview || !el.previewWrapper) return false;
+  return !currentRender && renderCompleted && lastRenderedText === el.editor.value;
+}
+
+/**
+ * Waits until the preview has rendered at least through a source line.
+ *
+ * @param {number} line
+ * @returns {Promise<void>}
+ */
+export function ensureRenderedThrough(line) {
+  if (!currentRender && lastRenderedText === el.editor.value && anchors.length > 0) {
+    return Promise.resolve();
+  }
+
+  if (!currentRender || currentRender.text !== el.editor.value) {
+    renderNow(lastReason).catch((err) => console.error('Preview render failed:', err));
+  }
+
+  const job = currentRender;
+  if (!job || job.renderedThrough >= line) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    job.waiters.push({ line, resolve });
+  });
+}
+
+/**
+ * Renders the whole preview, even when a lazy job is already running.
+ * @returns {Promise<void>}
+ */
+export function renderAll() {
+  return flushRender({ force: false });
+}
+
+/**
+ * @returns {boolean} whether the preview still has chunks to append
+ */
+export function isPreviewRendering() {
+  if (!el.preview || !el.previewWrapper) return false;
+  return Boolean(currentRender) || !renderCompleted;
+}
+
+/**
+ * Stops a render job that is no longer wanted.
+ */
+function cancelRender() {
+  if (!currentRender) return;
+  const job = currentRender;
+  job.cancelled = true;
+  currentRender = null;
+  job.waiters.forEach((waiter) => waiter.resolve());
+  job.waiters = [];
+}
+
+/**
+ * Resolves the callers waiting for a source line.
+ *
+ * @param {object} job
+ * @param {boolean} [all] resolve the waiters whose line was never reached
+ *   as well, so a request for a line past the end cannot hang.
+ */
+function resolveWaiters(job, all = false) {
+  if (job.waiters.length === 0) return;
+
+  const remaining = [];
+  for (const waiter of job.waiters) {
+    if (all || job.renderedThrough >= waiter.line) waiter.resolve();
+    else remaining.push(waiter);
+  }
+  job.waiters = remaining;
+}
+
+/**
+ * Renders the current document into the preview in balanced slices.
+ *
+ * @param {'edited'|'replaced'|'translated'} reason
+ * @param {{ force?: boolean }} [options]
+ * @returns {Promise<void>}
+ */
+function renderNow(reason, { force = false } = {}) {
   const settings = getSettings();
 
   // When the user asked us not to interrupt narration, the DOM rewrite waits
@@ -109,76 +212,165 @@ function renderNow(reason) {
   // document that is no longer on screen.
   if (isSpeaking() && !settings.autoStopOnReplace) {
     pendingRender = reason;
-    return;
+    return Promise.resolve();
   }
 
   const markdownText = el.editor.value;
-  const html = renderMarkdown(markdownText);
 
-  if (html !== lastHtml) {
-    // Stop narration BEFORE the DOM is replaced: the running utterance
-    // describes the old document and would otherwise keep highlighting
-    // words in the new one.
-    markTokensStale(reason);
-    el.preview.innerHTML = html;
-    lastHtml = html;
-
-    // Mermaid diagrams are drawn once the DOM exists — the renderer needs a
-    // live document to lay the diagram out.
-    renderMermaidDiagrams(el.preview);
-
-    // The rewrite resets the scroll position — put the reader back where
-    // they were, once the new content has been laid out.
-    if (!positionRestored) setTimeout(restorePosition, 60);
-
-    // Let the outline know the document was re-rendered — the heading
-    // elements it holds have just been replaced.
-    el.preview.dispatchEvent(new CustomEvent('preview:rendered'));
+  if (!force && currentRender && !currentRender.cancelled && currentRender.text === markdownText) {
+    return currentRender.promise;
   }
 
+  if (!force && !currentRender && lastRenderedText === markdownText) {
+    return Promise.resolve();
+  }
+
+  if (reason === 'replaced') {
+    // A new document starts at the top; the old article's ratio means
+    // nothing here.
+    restoreSourceLine = null;
+    positionRestored = true;
+    try {
+      sessionStorage.removeItem(POSITION_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+    el.previewWrapper.scrollTop = 0;
+    el.editor.scrollTop = 0;
+    el.lineNumbers.scrollTop = 0;
+  } else if (positionRestored) {
+    restoreSourceLine = getPreviewTopLine();
+  }
+
+  cancelRender();
+  markTokensStale(reason);
+
+  // The language belongs to the document, not to the last chunk of it: the
+  // narrator may start as soon as the first block is on the page.
   const locale = detectLanguage(markdownText);
   setSTTLocale(locale);
   setDocumentLocale(locale);
+  lastRenderEnv = {};
 
-  scheduleTokenize();
-}
-
-/**
- * Tokenizes the preview during idle time so the word counter stays accurate
- * without competing with typing. Large documents get a longer grace period so
- * the token pass only runs when the browser is genuinely idle.
- */
-function scheduleTokenize() {
-  cancelTokenize();
-
-  const run = () => {
-    idleHandle = null;
-    const tokens = ensureTokens();
-    if (el.activeTokenInfo) {
-      el.activeTokenInfo.textContent = `${tokens.length} words ready`;
-    }
+  const job = {
+    id: renderSequence + 1,
+    text: markdownText,
+    reason,
+    cancelled: false,
+    renderedThrough: 0,
+    waiters: [],
+    promise: null
   };
+  renderSequence = job.id;
+  currentRender = job;
 
-  const size = el.editor.value.length;
-  const timeout = size > 80000 ? 3000 : size > 25000 ? 1200 : 600;
+  el.preview.replaceChildren();
+  anchors = [];
+  anchorsDirty = true;
+  renderCompleted = false;
 
-  if (typeof window.requestIdleCallback === 'function') {
-    idleUsesRaf = true;
-    idleHandle = window.requestIdleCallback(run, { timeout });
-  } else {
-    idleUsesRaf = false;
-    idleHandle = setTimeout(run, size > 25000 ? 600 : 150);
-  }
-}
+  job.promise = (async () => {
+    const { tokens, env } = parseMarkdownDocument(markdownText);
+    const groups = groupMarkdownTokens(tokens);
+    lastRenderEnv = env;
+    totalSourceLines = markdownText ? markdownText.split('\n').length : 1;
 
-function cancelTokenize() {
-  if (idleHandle === null) return;
-  if (idleUsesRaf && typeof window.cancelIdleCallback === 'function') {
-    window.cancelIdleCallback(idleHandle);
-  } else {
-    clearTimeout(idleHandle);
-  }
-  idleHandle = null;
+    el.preview.dispatchEvent(
+      new CustomEvent('preview:render-start', {
+        detail: { groups: groups.length, chars: markdownText.length }
+      })
+    );
+
+    let sliceStarted = performance.now();
+
+    for (let index = 0; index < groups.length; index += 1) {
+      if (job.cancelled || job.id !== renderSequence) return;
+
+      const group = groups[index];
+      const range = groupLineRange(group);
+      const previousLast = el.preview.lastElementChild;
+      const html = renderMarkdownGroup(group, env);
+
+      if (job.cancelled || job.id !== renderSequence) return;
+
+      if (html) el.preview.insertAdjacentHTML('beforeend', html);
+      const added = [];
+      let addedNode = previousLast ? previousLast.nextElementSibling : el.preview.firstElementChild;
+      while (addedNode) {
+        added.push(addedNode);
+        addedNode = addedNode.nextElementSibling;
+      }
+      if (isSpeaking() || isSpeechPaused()) appendSpeechBlocks(added);
+      const newBlocks = added.flatMap((node) =>
+        node.matches?.('.mermaid-block') ? [node] : Array.from(node.querySelectorAll?.('.mermaid-block') || [])
+      );
+      if (newBlocks.length > 0) renderMermaidDiagrams(el.preview, newBlocks);
+
+      job.renderedThrough = Math.max(job.renderedThrough, range.endLine);
+      anchorsDirty = true;
+      resolveWaiters(job);
+
+      el.preview.dispatchEvent(
+        new CustomEvent('preview:chunk', {
+          detail: { ...range, index, groups: groups.length }
+        })
+      );
+
+      // Rebuilding the anchor cache for every chunk turns a long re-render
+      // into an O(n^2) walk. The saved line can only be reached once the
+      // render has actually passed it.
+      if (restoreSourceLine !== null && job.renderedThrough >= restoreSourceLine) {
+        // The line has been rendered. If no anchor covers it (trailing blank
+        // lines, for instance), it will never become reachable: stop trying.
+        if (!tryRestoreSourceLine()) restoreSourceLine = null;
+      }
+
+      if (index < groups.length - 1) {
+        const shouldBreak =
+          performance.now() - sliceStarted > 8 ||
+          (groups.length >= 40 && index % 8 === 7);
+        if (shouldBreak) {
+          sliceStarted = performance.now();
+          await yieldToMainThread();
+        }
+      }
+    }
+
+    if (job.cancelled || job.id !== renderSequence) return;
+
+    lastRenderedText = markdownText;
+    renderCompleted = true;
+    currentRender = null;
+    anchorsDirty = true;
+    rebuildAnchorCache();
+    resolveWaiters(job, true);
+
+    if (el.activeTokenInfo) {
+      const estimate = Math.max(1, Math.ceil(markdownText.length / 6));
+      el.activeTokenInfo.textContent = `~${estimate} words`;
+    }
+
+    if (restoreSourceLine !== null) {
+      tryRestoreSourceLine();
+      restoreSourceLine = null;
+    } else if (!positionRestored) {
+      setTimeout(restorePosition, 60);
+    }
+
+    el.preview.dispatchEvent(new CustomEvent('preview:rendered'));
+  })();
+
+  return job.promise.catch((err) => {
+    if (job.cancelled) return;
+    if (job.id === renderSequence) {
+      currentRender = null;
+      // Do not leave the app in "still rendering" forever. The preview is
+      // incomplete, but a later flush is free to try again.
+      renderCompleted = true;
+      lastRenderedText = null;
+    }
+    console.error('Preview render failed:', err);
+  });
 }
 
 /**
@@ -186,8 +378,187 @@ function cancelTokenize() {
  * rendered output changes).
  */
 export function refreshPreview() {
-  lastHtml = '';
-  flushRender();
+  cancelRender();
+  lastRenderedText = null;
+  renderCompleted = false;
+  // A settings change is not a new document: it must not throw the reader
+  // back to the top (renderNow resets the position for 'replaced').
+  flushRender({ force: true, reason: 'edited' });
+}
+
+/**
+ * The offsets at which each source line starts.
+ * @param {string} text
+ * @returns {number[]}
+ */
+function sourceLineStarts(text) {
+  const starts = [0];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === '\n') starts.push(index + 1);
+  }
+  return starts;
+}
+
+/**
+ * Moves the source-line attributes of a rendered fragment to their place in
+ * the whole document. A fragment parsed on its own starts at line 1; inserting
+ * it as it is would make the outline, the scroll sync and the next translation
+ * window point at the wrong block.
+ *
+ * @param {HTMLElement} holder
+ * @param {number} lineOffset zero-based offset of the fragment's first line
+ */
+function rebaseSourceLines(holder, lineOffset) {
+  if (!holder || lineOffset === 0) return;
+
+  holder.querySelectorAll('[data-line]').forEach((node) => {
+    const line = Number(node.dataset.line);
+    if (Number.isFinite(line) && line > 0) {
+      node.dataset.line = String(line + lineOffset);
+    }
+
+    const end = Number(node.dataset.lineEnd);
+    if (Number.isFinite(end) && end > 0) {
+      node.dataset.lineEnd = String(end + lineOffset);
+    }
+  });
+}
+
+/**
+ * The top-level element that represents an anchor in the preview.
+ *
+ * A fenced code block is anchored to the inner `<code>` (that is where
+ * markdown-it writes the attributes), but the block the reader sees is the
+ * whole `.code-block` panel. Replacing the inner element would leave the
+ * header and the gutter behind and nest a second panel inside the first.
+ *
+ * @param {HTMLElement} node
+ * @returns {HTMLElement}
+ */
+function anchorTarget(node) {
+  if (node.matches('code[data-line]')) {
+    const block = node.closest('.code-block');
+    if (block && el.preview.contains(block)) return block;
+  }
+  return node;
+}
+
+/**
+ * Re-renders only the blocks that overlap a changed source line range.
+ *
+ * Translation writes one visible window at a time. Replacing the whole
+ * preview for every window would throw away the reader's position and walk
+ * the rest of the book again; this keeps every untouched block exactly as it
+ * is.
+ *
+ * @param {number} startLine
+ * @param {number} endLine
+ * @returns {boolean} whether the preview was patched
+ */
+export function patchPreviewLines(startLine, endLine) {
+  if (!el.preview || !el.previewWrapper) return false;
+  if (!renderCompleted || !lastRenderedText) {
+    scheduleRender('translated');
+    return false;
+  }
+
+  const text = el.editor.value;
+  const starts = sourceLineStarts(text);
+  if (starts.length !== totalSourceLines) {
+    lastRenderedText = null;
+    renderCompleted = false;
+    scheduleRender('translated');
+    return false;
+  }
+
+  const list = getAnchors();
+  const affected = list.filter(
+    (anchor) => anchor.line <= endLine && anchor.endLine >= startLine
+  );
+
+  if (affected.length === 0) {
+    // The fallback render must not be mistaken for a finished one: a later
+    // patch would set lastRenderedText and cancel it.
+    lastRenderedText = null;
+    renderCompleted = false;
+    scheduleRender('translated');
+    return false;
+  }
+
+  markTokensStale('content-edited');
+
+  let patched = false;
+
+  for (const anchor of [...affected].reverse()) {
+    if (anchor.el.closest('.footnotes') || anchor.el.matches('.footnotes, .footnotes-sep')) {
+      lastRenderedText = null;
+      renderCompleted = false;
+      scheduleRender('translated');
+      return false;
+    }
+
+    const from = starts[anchor.line - 1] ?? 0;
+    const to = anchor.endLine < starts.length ? starts[anchor.endLine] : text.length;
+    const fragment = text.slice(from, to);
+
+    // A footnote reference needs the footnote definitions from the rest of
+    // the document; a group parsed on its own would lose the link.
+    if (/\[\^[^\]\s]+\]/.test(fragment)) {
+      lastRenderedText = null;
+      renderCompleted = false;
+      scheduleRender('translated');
+      return false;
+    }
+
+    // Reference-style links are defined elsewhere in the document too. The
+    // environment of the last full parse carries them, so a fragment does
+    // not turn `[text][ref]` into literal text.
+    const baseEnv = lastRenderEnv || {};
+    const env = {
+      ...baseEnv,
+      references: { ...(baseEnv.references || {}) }
+    };
+    const { tokens, env: parsedEnv } = parseMarkdownDocument(fragment, env);
+    const groups = groupMarkdownTokens(tokens);
+
+    const holder = document.createElement('div');
+    for (const group of groups) {
+      holder.insertAdjacentHTML('beforeend', renderMarkdownGroup(group, parsedEnv));
+    }
+
+    rebaseSourceLines(holder, anchor.line - 1);
+
+    const target = anchorTarget(anchor.el);
+    const oldHeading = /^H[1-6]$/.test(target.tagName) ? target.id : '';
+    const newHeading = holder.querySelector('h1, h2, h3, h4, h5, h6');
+    if (oldHeading && newHeading) {
+      newHeading.id = oldHeading;
+      const permalink = newHeading.querySelector('.heading-anchor');
+      if (permalink) permalink.setAttribute('href', `#${oldHeading}`);
+    }
+
+    const newBlocks = Array.from(holder.children);
+    const diagrams = newBlocks.flatMap((node) =>
+      node.matches?.('.mermaid-block') ? [node] : Array.from(node.querySelectorAll?.('.mermaid-block') || [])
+    );
+
+    target.replaceWith(...newBlocks);
+    if (diagrams.length > 0) renderMermaidDiagrams(el.preview, diagrams);
+    patched = true;
+  }
+
+  lastRenderedText = text;
+  renderCompleted = true;
+  anchorsDirty = true;
+  rebuildAnchorCache();
+
+  if (el.activeTokenInfo) {
+    const estimate = Math.max(1, Math.ceil(text.length / 6));
+    el.activeTokenInfo.textContent = `~${estimate} words`;
+  }
+
+  el.preview.dispatchEvent(new CustomEvent('preview:rendered'));
+  return patched;
 }
 
 /* ==========================================================================
@@ -217,27 +588,112 @@ const suppressScroll = { editor: false, preview: false };
 /* --------------------------------------------------------------- anchors -- */
 
 /**
- * The preview blocks that carry a source line, in document order.
- *
- * Each entry also knows how many source lines the block spans, which is what
- * makes a line-accurate mapping possible.
- *
- * @returns {Array<{ el: HTMLElement, line: number, lines: number }>}
+ * Rebuilds the anchor cache after new blocks were added or replaced.
  */
-function getAnchors() {
+function rebuildAnchorCache() {
+  if (!anchorsDirty) return;
+
   const elements = Array.from(el.preview.querySelectorAll('[data-line]'));
-  if (elements.length === 0) return [];
 
-  const totalLines = el.editor.value.split('\n').length;
-
-  return elements.map((node, index) => {
+  anchors = elements.map((node, index) => {
     const line = Number(node.dataset.line) || 1;
     const next = elements[index + 1];
-    // The block reaches up to the next block's first line; the last block
-    // reaches the end of the document.
-    const end = next ? Number(next.dataset.line) - 1 : totalLines;
-    return { el: node, line, lines: Math.max(1, end - line + 1) };
+    const declaredEnd = Number(node.dataset.lineEnd);
+    const end = Number.isFinite(declaredEnd) && declaredEnd > 0
+      ? declaredEnd
+      : next
+        ? Number(next.dataset.line) - 1
+        : totalSourceLines;
+
+    return {
+      el: node,
+      line,
+      endLine: Math.max(line, end),
+      lines: Math.max(1, end - line + 1)
+    };
   });
+
+  anchorsDirty = false;
+}
+
+/**
+ * The preview blocks that carry a source line, in document order.
+ *
+ * @returns {Array<{ el: HTMLElement, line: number, endLine: number, lines: number }>}
+ */
+function getAnchors() {
+  rebuildAnchorCache();
+  return anchors;
+}
+
+/**
+ * Finds the anchor covering a vertical position in the preview.
+ *
+ * @param {number} y
+ * @returns {{ index: number, block: object|null, line: number }}
+ */
+function anchorAtY(y) {
+  const list = getAnchors();
+  if (list.length === 0) return { index: -1, block: null, line: 1 };
+
+  let low = 0;
+  let high = list.length - 1;
+  let index = 0;
+
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (list[middle].el.offsetTop <= y) {
+      index = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  const block = list[index];
+  const height = block.el.offsetHeight || 1;
+  const within = Math.min(1, Math.max(0, (y - block.el.offsetTop) / height));
+  const line = Math.min(
+    block.endLine,
+    block.line + Math.floor(within * Math.max(1, block.lines))
+  );
+
+  return { index, block, line };
+}
+
+/**
+ * The source line currently at the top of the preview.
+ * @returns {number}
+ */
+function getPreviewTopLine() {
+  return anchorAtY(el.previewWrapper.scrollTop + 8).line;
+}
+
+/**
+ * The source line range currently visible.
+ *
+ * @returns {{ startLine: number, endLine: number, topBlock: object|null, bottomBlock: object|null }}
+ */
+export function getVisibleSourceRange() {
+  if (!el.preview || !el.previewWrapper) {
+    return { startLine: 1, endLine: 1, topBlock: null, bottomBlock: null };
+  }
+
+  const list = getAnchors();
+  if (list.length === 0) {
+    return { startLine: 1, endLine: 1, topBlock: null, bottomBlock: null };
+  }
+
+  const top = anchorAtY(el.previewWrapper.scrollTop + 8);
+  const bottomY = el.previewWrapper.scrollTop + el.previewWrapper.clientHeight;
+  const bottom = anchorAtY(bottomY);
+
+  return {
+    startLine: top.line,
+    endLine: Math.max(top.line, bottom.line),
+    topBlock: top.block,
+    bottomBlock: bottom.block
+  };
 }
 
 /**
@@ -247,7 +703,7 @@ function getAnchors() {
 function getEditorLineHeight() {
   const lineHeight = Number.parseFloat(getComputedStyle(el.editor).lineHeight);
   if (Number.isFinite(lineHeight) && lineHeight > 0) return lineHeight;
-  const total = el.editor.value.split('\n').length;
+  const total = totalSourceLines;
   return total > 0 ? (el.editor.scrollHeight - 32) / total : 20;
 }
 
@@ -281,18 +737,29 @@ function scrollEditorToLine(line) {
  * drift.
  *
  * @param {number} line
+ * @returns {boolean} whether the line could be reached
  */
 function scrollPreviewToLine(line) {
-  const anchors = getAnchors();
-  if (anchors.length === 0) return;
+  const list = getAnchors();
+  if (list.length === 0) return false;
 
+  let low = 0;
+  let high = list.length - 1;
   let index = 0;
-  for (let i = 0; i < anchors.length; i++) {
-    if (anchors[i].line <= line) index = i;
-    else break;
+
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (list[middle].line <= line) {
+      index = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
   }
 
-  const block = anchors[index];
+  const block = list[index];
+  if (line > block.endLine && index === list.length - 1) return false;
+
   const blockTop = block.el.offsetTop;
   const blockHeight = block.el.offsetHeight || 1;
 
@@ -301,6 +768,7 @@ function scrollPreviewToLine(line) {
   const offset = within * blockHeight;
 
   scrollPane(el.previewWrapper, 'preview', Math.max(0, blockTop + offset - 16));
+  return true;
 }
 
 /**
@@ -308,24 +776,35 @@ function scrollPreviewToLine(line) {
  * @param {number} line
  */
 export function jumpToLine(line) {
-  scrollPreviewToLine(line);
+  el.preview.dispatchEvent(new CustomEvent('preview:user-navigation'));
+
+  if (currentRender && currentRender.renderedThrough < line) {
+    ensureRenderedThrough(line)
+      .then(() => scrollPreviewToLine(line))
+      .catch((err) => console.error('Could not reach the line:', err));
+    return;
+  }
+
+  if (!scrollPreviewToLine(line) && currentRender) {
+    ensureRenderedThrough(line)
+      .then(() => scrollPreviewToLine(line))
+      .catch((err) => console.error('Could not reach the line:', err));
+  }
 }
 
 /**
- * The source line currently at the top of the preview.
- * @returns {number}
+ * Re-applies the source line the reader was looking at while chunks arrive.
+ * @returns {boolean} whether the line could be reached
  */
-function getPreviewTopLine() {
-  const anchors = getAnchors();
-  if (anchors.length === 0) return 1;
+function tryRestoreSourceLine() {
+  if (restoreSourceLine === null) return false;
 
-  const scrollerTop = el.previewWrapper.scrollTop;
-  let current = anchors[0];
-  for (const anchor of anchors) {
-    if (anchor.el.offsetTop <= scrollerTop + 8) current = anchor;
-    else break;
+  if (scrollPreviewToLine(restoreSourceLine)) {
+    restoreSourceLine = null;
+    return true;
   }
-  return current.line;
+
+  return false;
 }
 
 /* ------------------------------------------------------------------ wiring -- */
@@ -481,6 +960,7 @@ function savePosition() {
 function restorePosition() {
   if (positionRestored) return;
   if (!getSettings().rememberPosition) return;
+  if (!renderCompleted) return;
 
   let ratio = 0;
   try {
@@ -488,7 +968,10 @@ function restorePosition() {
   } catch {
     ratio = 0;
   }
-  if (!Number.isFinite(ratio) || ratio <= 0) return;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    positionRestored = true;
+    return;
+  }
 
   const max = el.previewWrapper.scrollHeight - el.previewWrapper.clientHeight;
   if (max <= 0) return;
@@ -579,6 +1062,7 @@ function handleLinkClick(linkEl) {
   if (href.startsWith('#')) {
     const target = el.preview.querySelector(`#${CSS.escape(decodeURIComponent(href.slice(1)))}`);
     if (!target) return;
+    el.preview.dispatchEvent(new CustomEvent('preview:user-navigation'));
     target.scrollIntoView({ behavior: getSettings().smoothScrollActive ? 'smooth' : 'auto' });
     return;
   }
@@ -621,7 +1105,41 @@ export function initPreview() {
   applyFollowSetting();
   adoptLegacyPosition();
 
-  onContentChange(({ reason }) => scheduleRender(reason));
+  onContentChange(({ reason, editOffset }) => {
+    // Translation patches the affected blocks itself after it has written
+    // the source; a full render here would defeat the lazy path.
+    if (reason === 'translated') return;
+
+    if (reason === 'replaced' && editPatchTimer) {
+      clearTimeout(editPatchTimer);
+      editPatchTimer = null;
+    }
+
+    if (
+      reason === 'edited' &&
+      Number.isFinite(editOffset) &&
+      el.editor.value.length >= LARGE_DOC_CHARS &&
+      (!isSpeaking() || getSettings().autoStopOnReplace)
+    ) {
+      if (editPatchTimer) clearTimeout(editPatchTimer);
+      editPatchTimer = setTimeout(() => {
+        editPatchTimer = null;
+
+        if (el.editor.value.length < LARGE_DOC_CHARS) {
+          scheduleRender('edited');
+          return;
+        }
+
+        // The line is worked out here, not in the input event: walking a
+        // book-sized document on every keystroke would make typing lag.
+        const editLine = lineAtOffset(el.editor.value, editOffset);
+        if (!patchPreviewLines(editLine - 2, editLine + 2)) scheduleRender('edited');
+      }, 120);
+      return;
+    }
+
+    scheduleRender(reason);
+  });
 
   // The "follow the narration" preference applies immediately
   onSettingsChange(() => applyFollowSetting());
@@ -650,9 +1168,9 @@ export function initPreview() {
   });
 
   // A diagram that finished drawing adds words to the document — the word
-  // count and the narration have to learn them.
+  // count and the narration can learn them when they are next needed.
   el.preview.addEventListener('preview:diagram-rendered', () => {
-    scheduleTokenize();
+    // Tokenization is now windowed; nothing is precomputed while idle.
   });
 
   // Remember the reading position, and yield to the reader when they scroll

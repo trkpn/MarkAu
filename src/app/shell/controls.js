@@ -62,7 +62,16 @@ function initTransport() {
   });
 
   onTTSStateChange((state) => {
-    const { isPlaying, isPaused, starting, currentWordIndex, totalWords, reason } = state;
+    const {
+      isPlaying,
+      isPaused,
+      starting,
+      currentWordIndex,
+      totalWords,
+      progress,
+      totalWordsEstimated,
+      reason
+    } = state;
 
     // "Starting" covers the window between the press and the moment the
     // speech engine actually begins — tokenizing a large document takes a
@@ -105,7 +114,11 @@ function initTransport() {
       setBaseMessage('Starting…', 'accent');
     } else if (isPlaying && !isPaused) {
       setNarrationState('playing');
-      setBaseMessage(`Reading word ${Math.max(0, currentWordIndex) + 1}/${totalWords}`, 'accent');
+      const place =
+        totalWordsEstimated && Number.isFinite(progress)
+          ? `${Math.round(Math.max(0, progress) * 100)}%`
+          : `${Math.max(0, currentWordIndex) + 1}/${totalWords}`;
+      setBaseMessage(`Reading ${place}`, 'accent');
     } else if (isPaused) {
       setNarrationState('paused');
       setBaseMessage('Paused', 'muted');

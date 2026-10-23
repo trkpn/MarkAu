@@ -67,7 +67,8 @@ const {
   saveBackup,
   clearBackup,
   runTranslation,
-  runTranslationWithRetry
+  runTranslationWithRetry,
+  restoreLazySession
 } = await import('@/app/translate/translate.js');
 const { el } = await import('@/app/shell/dom.js');
 
@@ -169,6 +170,21 @@ describe('the original of the document', () => {
   it('is kept the first time', () => {
     expect(saveBackup('# The original', 'th')).toBe(true);
     expect(readBackup().markdown).toBe('# The original');
+  });
+
+  it('is reported as not kept when the storage refuses the write', () => {
+    const write = localStorage.setItem;
+    localStorage.setItem = () => {
+      throw new Error('The storage is full');
+    };
+
+    try {
+      expect(saveBackup('# The original', 'th')).toBe(false);
+    } finally {
+      localStorage.setItem = write;
+    }
+
+    expect(readBackup()).toBeNull();
   });
 
   it('is not thrown away by a second translation', () => {
@@ -423,5 +439,49 @@ describe('when the translator refuses', () => {
 
     expect(done).toBe(false);
     expect(el.translateError.textContent).toContain('busy');
+  });
+});
+
+describe('a large document', () => {
+  it('translates the visible part and leaves the rest untouched', async () => {
+    storage.clear();
+
+    const paragraph = 'This paragraph is long enough to be worth translating. ';
+    const lines = Array.from({ length: 4000 }, () => paragraph.trim());
+    el.editor.value = lines.join('\n');
+    el.editor.setSelectionRange(0, 0);
+    const originalTail = el.editor.value.slice(-2000);
+
+    globalThis.fetch = async (input, init) => {
+      const url = String(typeof input === 'string' ? input : input?.url);
+
+      if (url.includes('/api/translate')) {
+        const body = JSON.parse(init.body);
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            detected: 'en',
+            results: body.units.map((unit) => `TH<${unit}>`)
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+
+      return new Response(JSON.stringify({ sentences: [], src: 'en' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    const done = await runTranslation();
+
+    expect(done).toBe(true);
+    expect(el.editor.value).toContain('TH<');
+    expect(el.editor.value.slice(-2000)).toBe(originalTail);
+
+    // The stored fingerprint is that of the original, while the document is
+    // now translated. The session must still recognise its own document.
+    const resumed = await restoreLazySession();
+    expect(resumed).toBe(true);
   });
 });

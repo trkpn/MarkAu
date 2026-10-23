@@ -133,12 +133,16 @@ function katexPlugin(md) {
     if (state.src.slice(start, end).includes('\n')) return false;
     if (end === start) return false;
 
+    // An inline rule must advance `state.pos` in validation mode too: the
+    // parser walks link labels with it, and a rule that reports a match
+    // without moving on makes the whole parse throw.
+    state.pos = end + 1;
+
     if (silent) return true;
 
     const content = state.src.slice(start, end);
     const token = state.push('math_inline', 'math', 0);
     token.content = content;
-    state.pos = end + 1;
     return true;
   });
 
@@ -371,6 +375,7 @@ md.core.ruler.push('source_lines', (state) => {
   for (const token of state.tokens) {
     if (token.level !== 0 || !token.map || token.type === 'inline') continue;
     token.attrSet('data-line', String(token.map[0] + 1));
+    token.attrSet('data-line-end', String(token.map[1]));
   }
 });
 
@@ -589,6 +594,123 @@ const DOMPURIFY_CONFIG = {
     'stroke-linejoin'
   ]
 };
+
+/**
+ * Parses a document into Markdown-it tokens without rendering them.
+ *
+ * The parse is done once for the whole document. Footnotes, heading slugs and
+ * the line maps are document-wide facts, so a chunk that was parsed on its
+ * own would be wrong.
+ *
+ * @param {string} markdownText
+ * @param {object} [env={}]
+ * @returns {{ body: string, tokens: object[], env: object }}
+ */
+export function parseMarkdownDocument(markdownText, env = {}) {
+  const { body } = parseFrontmatter(markdownText);
+  const tokens = markdownText ? md.parse(body, env) : [];
+  return { body, tokens, env };
+}
+
+/**
+ * Groups tokens so every group is a balanced top-level fragment.
+ *
+ * A paragraph, a list, a table, a blockquote and the footnote section each
+ * stay whole. Rendering such a group on its own is safe for the sanitizer;
+ * cutting inside a list would produce half an element.
+ *
+ * @param {object[]} tokens
+ * @returns {object[][]}
+ */
+export function groupMarkdownTokens(tokens) {
+  const groups = [];
+  let index = 0;
+
+  while (index < tokens.length) {
+    const token = tokens[index];
+
+    if (token.level !== 0) {
+      index += 1;
+      continue;
+    }
+
+    if (token.nesting === 0 || token.nesting === undefined) {
+      groups.push(tokens.slice(index, index + 1));
+      index += 1;
+      continue;
+    }
+
+    if (token.nesting === 1) {
+      let end = index + 1;
+
+      while (end < tokens.length) {
+        const candidate = tokens[end];
+        if (candidate.level === 0 && candidate.nesting === -1) {
+          end += 1;
+          break;
+        }
+        end += 1;
+      }
+
+      groups.push(tokens.slice(index, end));
+      index = end;
+      continue;
+    }
+
+    // A stray closing token is not rendered on its own.
+    index += 1;
+  }
+
+  return groups;
+}
+
+/**
+ * The source line range a token group covers.
+ *
+ * @param {object[]} group
+ * @returns {{ startLine: number, endLine: number }}
+ */
+export function groupLineRange(group) {
+  let start = null;
+  let end = null;
+
+  for (const token of group) {
+    if (!token.map) continue;
+    if (start === null || token.map[0] < start) start = token.map[0];
+    if (end === null || token.map[1] > end) end = token.map[1];
+  }
+
+  return {
+    startLine: start === null ? 1 : start + 1,
+    endLine: end === null ? (start === null ? 1 : start + 1) : end
+  };
+}
+
+/**
+ * Renders and sanitizes one balanced token group.
+ *
+ * @param {object[]} group
+ * @param {object} [env={}]
+ * @returns {string}
+ */
+export function renderMarkdownGroup(group, env = {}) {
+  if (!group || group.length === 0) return '';
+  const rawHtml = md.renderer.render(group, md.options, env);
+  return DOMPurify.sanitize(rawHtml, DOMPURIFY_CONFIG);
+}
+
+/**
+ * Renders a whole document from an already-parsed token list.
+ *
+ * @param {object[]} tokens
+ * @param {object} [env={}]
+ * @returns {string}
+ */
+export function renderMarkdownTokens(tokens, env = {}) {
+  if (!tokens || tokens.length === 0) return '';
+  const rawHtml = md.renderer.render(tokens, md.options, env);
+  return DOMPurify.sanitize(rawHtml, DOMPURIFY_CONFIG);
+}
 
 /**
  * Converts markdown raw string to sanitized HTML

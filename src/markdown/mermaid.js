@@ -409,8 +409,10 @@ async function renderBlock(mermaid, block, index, theme) {
   }
 
   // The position is part of the key: two identical diagrams in one document
-  // must not share the element ids Mermaid bakes into the SVG.
-  const cacheKey = `${theme}|${index}|${source}`;
+  // must not share the element ids Mermaid bakes into the SVG. The source
+  // line is stable across chunks and repairs.
+  const position = block.dataset.line || String(index);
+  const cacheKey = `${theme}|${position}|${source}`;
   const cached = svgCache.get(cacheKey);
   if (cached) {
     applySvg(block, cached.svg);
@@ -477,20 +479,25 @@ function bindDiagram(block, bindFunctions) {
 }
 
 /**
- * Draws every Mermaid diagram inside the given root.
+ * Draws the Mermaid diagrams inside the given root.
  *
  * The call is fire-and-forget: the preview must not wait for the diagrams,
- * and a failure must never break the render pipeline.
+ * and a failure must never break the render pipeline. When a progressive
+ * preview has just appended a chunk, `onlyBlocks` limits the pass to the new
+ * placeholders instead of walking the whole document again.
  *
  * @param {HTMLElement} root the preview container
+ * @param {HTMLElement[]|null} [onlyBlocks]
  * @returns {Promise<void>}
  */
-export async function renderMermaidDiagrams(root) {
+export async function renderMermaidDiagrams(root, onlyBlocks = null) {
   if (!root) return;
 
   activeRoot = root;
 
-  const blocks = Array.from(root.querySelectorAll(BLOCK_SELECTOR));
+  const blocks = onlyBlocks
+    ? onlyBlocks.filter((block) => block?.classList?.contains('mermaid-block'))
+    : Array.from(root.querySelectorAll(BLOCK_SELECTOR));
   if (blocks.length === 0) return;
 
   const theme = resolveTheme();
@@ -509,6 +516,14 @@ export async function renderMermaidDiagrams(root) {
   for (let index = 0; index < blocks.length; index++) {
     const block = blocks[index];
     if (!block.isConnected) continue;
+    if (
+      block.dataset.mermaidState === 'rendered' ||
+      block.dataset.mermaidState === 'error' ||
+      block.dataset.mermaidState === 'pending'
+    ) {
+      continue;
+    }
+    block.dataset.mermaidState = 'pending';
     await renderBlock(mermaid, block, index, theme);
   }
 }

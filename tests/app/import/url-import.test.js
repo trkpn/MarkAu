@@ -155,6 +155,9 @@ describe('putting the document together', () => {
     expect(isTextual('')).toBe(true);
 
     expect(isTextual('application/pdf')).toBe(false);
+    expect(isTextual('application/vnd.openxmlformats-officedocument.wordprocessingml.document')).toBe(
+      false
+    );
     expect(isTextual('image/png')).toBe(false);
     expect(isTextual('video/mp4')).toBe(false);
     expect(isTextual('application/zip')).toBe(false);

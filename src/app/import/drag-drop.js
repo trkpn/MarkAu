@@ -16,9 +16,10 @@
  */
 
 import { el } from '@/app/shell/dom.js';
-import { openFile, setMarkdown } from '@/app/editor/editor.js';
+import { openFile } from '@/app/editor/editor.js';
 import { pasteAsDocument } from '@/app/editor/paste.js';
 import { runImport } from '@/app/import/url-import.js';
+import { isDocumentFile } from '@/app/import/document-file.js';
 import { setMessage } from '@/app/shell/status.js';
 
 /** How many levels of the page the pointer has entered. */
@@ -129,21 +130,21 @@ export async function handleDrop(dataTransfer) {
   if (files && files.length > 0) {
     const file = files[0];
 
-    // A PDF or a book is read, not opened as text.
+    // A PDF, a book or a Word document is read, not opened as text.
     if (isDocumentFile(file)) {
-      await readDroppedDocument(file);
+      await openFile(file);
       return;
     }
 
     if (!isTextFile(file)) {
-      setMessage('Only text files, PDFs and books can be opened here', {
+      setMessage('Only text files, PDFs, books and Word documents can be opened here', {
         tone: 'warn',
         ttl: 3000
       });
       return;
     }
 
-    openFile(file);
+    await openFile(file);
     return;
   }
 
@@ -161,63 +162,8 @@ export async function handleDrop(dataTransfer) {
   }
 }
 
-/**
- * Tells whether a file is a document the app can read — a PDF or a book.
- *
- * @param {File} file
- * @returns {boolean}
- */
-export function isDocumentFile(file) {
-  if (!file) return false;
-  if (file.type === 'application/pdf' || file.type === 'application/epub+zip') return true;
-  return /\.(pdf|epub)$/i.test(file.name || '');
-}
 
-/**
- * Reads a document that was dropped on the app.
- *
- * The file is already here, so it does not have to be fetched from
- * anywhere.
- *
- * @param {File} file
- * @returns {Promise<void>}
- */
-async function readDroppedDocument(file) {
-  setMessage('Reading…', { tone: 'muted' });
-
-  try {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const name = file.name || 'document';
-
-    let markdown = '';
-    let title = name;
-    let note = 'document';
-
-    if (/\.pdf$/i.test(name)) {
-      const { pdfToMarkdown, buildPdfDocument } = await import('@/importers/pdf.js');
-      const pdf = await pdfToMarkdown(bytes, { url: name });
-      markdown = buildPdfDocument(pdf, '');
-      title = pdf.title || name;
-      note = `PDF (${pdf.pages} pages)`;
-    } else if (/\.epub$/i.test(name)) {
-      const { epubToMarkdown } = await import('@/importers/epub.js');
-      const { htmlToMarkdownFragment } = await import('@/importers/html.js');
-      const book = await epubToMarkdown(bytes, {
-        url: name,
-        toMarkdown: (html, baseUrl) => htmlToMarkdownFragment(html, baseUrl)
-      });
-      markdown = book.markdown;
-      title = book.title || name;
-      note = `book (${book.chapters} chapters)`;
-    }
-
-    setMarkdown(markdown, 'replaced');
-    setMessage(`Read ${note} — ${title}`, { tone: 'accent', ttl: 3500 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'That document could not be read.';
-    setMessage(message, { tone: 'warn', ttl: 4000 });
-  }
-}
+export { isDocumentFile };
 
 /**
  * True when the drag began inside the editor — a selection of the text of

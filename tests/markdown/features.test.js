@@ -159,3 +159,31 @@ describe('code blocks', () => {
     expect(html).not.toContain('code-gutter');
   });
 });
+
+describe('inline math', () => {
+  it('renders a formula', () => {
+    const html = renderMarkdown('The mass is $E = mc^2$ exactly.');
+
+    expect(html).toContain('katex-inline');
+  });
+
+  it('renders inside a link label', () => {
+    // The parser validates a link label by walking it inline; the math rule
+    // used to report a match there without moving on, which made the whole
+    // document fail to render.
+    expect(() =>
+      renderMarkdown('Read [about $E = mc^2$ here](https://example.com).')
+    ).not.toThrow();
+
+    const html = renderMarkdown('Read [about $E = mc^2$ here](https://example.com).');
+
+    expect(html).toContain('href="https://example.com"');
+    expect(html).toContain('katex-inline');
+  });
+
+  it('leaves a lone dollar alone', () => {
+    const html = renderMarkdown('It costs $5 and that is all.');
+
+    expect(html).toContain('$5');
+  });
+});

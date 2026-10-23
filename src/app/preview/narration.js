@@ -20,7 +20,10 @@
  */
 
 import { play, pause, isSpeaking, isSpeechPaused, isNarrationStarting } from '@/speech/tts.js';
-import { flushRender } from '@/app/preview/preview.js';
+import { flushRender, isPreviewCurrent } from '@/app/preview/preview.js';
+
+/** True while a start is waiting for the preview to catch up. */
+let pendingStart = false;
 
 /**
  * Toggles the narration.
@@ -38,9 +41,33 @@ export function toggleNarration() {
     return 'paused';
   }
 
-  // The preview has to be current, or the narrator would read a document
-  // the editor has already replaced.
-  flushRender();
+  // Taking a pause back resumes the utterance that is already waiting; the
+  // preview does not have to be rebuilt for that.
+  if (isSpeaking() && isSpeechPaused()) {
+    flushRender();
+    play();
+    return isSpeechPaused() ? 'resumed' : 'playing';
+  }
+
+  // The preview has to be current, or the narrator would read a document the
+  // editor has already replaced. Rendering is incremental now, so wait for
+  // it instead of tokenizing the first block of a half-rendered page.
+  if (!isPreviewCurrent()) {
+    if (pendingStart) return 'starting';
+
+    pendingStart = true;
+    flushRender()
+      .then(() => {
+        pendingStart = false;
+        if (!isSpeaking() && !isSpeechPaused()) play();
+      })
+      .catch(() => {
+        pendingStart = false;
+      });
+
+    return 'starting';
+  }
+
   play();
   return isSpeechPaused() ? 'resumed' : 'playing';
 }

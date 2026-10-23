@@ -27,18 +27,22 @@ function setVisible(visible) {
 /**
  * Updates the label and the progress bar.
  */
-function updateProgress({ currentWordIndex, totalWords }) {
+function updateProgress({ currentWordIndex, totalWords, progress, totalWordsEstimated }) {
   if (!el.miniPlayer || el.miniPlayer.hidden) return;
 
   const total = Math.max(1, totalWords);
   const current = Math.max(0, currentWordIndex);
-  const percent = Math.min(100, (current / total) * 100);
+  const percent =
+    typeof progress === 'number' && Number.isFinite(progress)
+      ? Math.min(100, Math.max(0, progress * 100))
+      : Math.min(100, (current / total) * 100);
 
   if (el.mpBar) el.mpBar.style.width = `${percent.toFixed(1)}%`;
   if (el.mpLabel) {
-    el.mpLabel.textContent = isSpeechPaused()
-      ? `Paused · ${current}/${total}`
-      : `Reading ${current}/${total}`;
+    const place = totalWordsEstimated
+      ? `${Math.round(percent)}%`
+      : `${current}/${total}`;
+    el.mpLabel.textContent = isSpeechPaused() ? `Paused · ${place}` : `Reading ${place}`;
   }
 
   if (el.mpToggle) {

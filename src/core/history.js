@@ -25,13 +25,21 @@
 
 const HISTORY_STORAGE_KEY = 'markau_history_v1';
 
+import {
+  deleteStored,
+  isStorageAvailable,
+  readStored,
+  STORE,
+  writeStored
+} from '@/core/storage.js';
+
 const SCHEMA_VERSION = 1;
 
 /** How many versions are kept when nothing else is asked for. */
 export const DEFAULT_LIMIT = 100;
 
-/** How much space the history may take — about 1.5 MB of text. */
-export const HISTORY_BUDGET_BYTES = 1_500_000;
+/** How much space the history may take. IndexedDB makes room for large books. */
+export const HISTORY_BUDGET_BYTES = 16_000_000;
 
 /** The history never becomes empty: a history of nothing is no history. */
 export const MIN_ENTRIES = 1;
@@ -53,6 +61,13 @@ const REASONS = [REASON_AUTO, REASON_MANUAL, REASON_BEFORE_REPLACE, REASON_BEFOR
 
 /** The listeners that want to know when the history changes. */
 const listeners = new Set();
+
+/**
+ * The versions read from IndexedDB. `null` means the module is still using
+ * the synchronous local copy.
+ * @type {object[]|null}
+ */
+let idbEntries = null;
 
 /* ==========================================================================
  * Small helpers
@@ -313,14 +328,11 @@ function sanitizeEntry(raw, index = 0) {
 }
 
 /**
- * Reads the history out of the browser.
- *
- * A payload that cannot be read is not an error — the history starts from
- * empty, and the app carries on.
+ * Reads the local copy of the history.
  *
  * @returns {object[]} the versions, newest first
  */
-export function readHistory() {
+function readLocalHistory() {
   try {
     const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
     if (!raw) return [];
@@ -332,6 +344,40 @@ export function readHistory() {
     return list.map((entry, index) => sanitizeEntry(entry, index)).filter(Boolean);
   } catch {
     return [];
+  }
+}
+
+/**
+ * Reads the history out of the browser.
+ *
+ * A payload that cannot be read is not an error — the history starts from
+ * empty, and the app carries on.
+ *
+ * @returns {object[]} the versions, newest first
+ */
+export function readHistory() {
+  return idbEntries ?? readLocalHistory();
+}
+
+/**
+ * Loads the large history from IndexedDB, migrating the local copy when the
+ * database is new.
+ *
+ * @returns {Promise<void>}
+ */
+export async function initHistoryStorage() {
+  if (!isStorageAvailable()) return;
+
+  const stored = await readStored(STORE.HISTORY, 'entries');
+  if (Array.isArray(stored)) {
+    idbEntries = stored.map((entry, index) => sanitizeEntry(entry, index)).filter(Boolean);
+    return;
+  }
+
+  const local = readLocalHistory();
+  idbEntries = local;
+  if (local.length > 0) {
+    await writeStored(STORE.HISTORY, 'entries', local);
   }
 }
 
@@ -350,10 +396,27 @@ export function writeHistory(entries, options = {}) {
   const { limit = DEFAULT_LIMIT, budget = HISTORY_BUDGET_BYTES } = options;
   const list = Array.isArray(entries) ? entries : [];
 
+  const persistLarge = (value) => {
+    if (!isStorageAvailable()) return false;
+    idbEntries = value;
+    writeStored(STORE.HISTORY, 'entries', value).catch(() => {});
+    return true;
+  };
+
   const payload = JSON.stringify({ version: SCHEMA_VERSION, entries: list });
+
+  // A book-sized history does not belong in localStorage. Writing it there
+  // would copy the whole payload synchronously before the browser decides
+  // that it is too large.
+  if (payload.length > 2_000_000 && isStorageAvailable()) {
+    persistLarge(list);
+    notifyListeners();
+    return true;
+  }
 
   try {
     localStorage.setItem(HISTORY_STORAGE_KEY, payload);
+    persistLarge(list);
     notifyListeners();
     return true;
   } catch {
@@ -366,9 +429,14 @@ export function writeHistory(entries, options = {}) {
       HISTORY_STORAGE_KEY,
       JSON.stringify({ version: SCHEMA_VERSION, entries: smaller })
     );
+    persistLarge(smaller);
     notifyListeners();
     return true;
   } catch {
+    if (persistLarge(prune(list, { limit, budget }))) {
+      notifyListeners();
+      return true;
+    }
     return false;
   }
 }
@@ -546,6 +614,10 @@ export function clearHistory() {
     localStorage.removeItem(HISTORY_STORAGE_KEY);
   } catch {
     /* the storage may be unavailable */
+  }
+  if (isStorageAvailable()) {
+    idbEntries = [];
+    deleteStored(STORE.HISTORY, 'entries').catch(() => {});
   }
   notifyListeners();
 }

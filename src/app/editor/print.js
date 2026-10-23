@@ -35,9 +35,9 @@ export function getDocumentTitle() {
 /**
  * Prints the current document.
  */
-export function printDocument() {
+export async function printDocument() {
   // The preview has to be current, or the printout shows an older version.
-  flushRender();
+  await flushRender();
 
   const previous = document.title;
   const title = getDocumentTitle();

@@ -171,13 +171,27 @@ export function parseTranslateResponse(payload) {
  * @param {string} client
  * @param {object} [options]
  * @param {typeof fetch} [options.fetchImpl]
+ * @param {AbortSignal} [options.signal]
  * @returns {Promise<{ text: string, detected: string }>}
  */
-async function translateWithClient(text, target, client, { fetchImpl = fetch } = {}) {
+async function translateWithClient(
+  text,
+  target,
+  client,
+  { fetchImpl = fetch, signal } = {}
+) {
   const url = buildTranslateUrl(text, target, client);
+
+  if (signal?.aborted) {
+    const aborted = new Error('The work was stopped.');
+    aborted.name = 'AbortError';
+    throw aborted;
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const onAbort = () => controller.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
 
   let response;
   try {
@@ -192,12 +206,18 @@ async function translateWithClient(text, target, client, { fetchImpl = fetch } =
       }
     });
   } catch (err) {
+    if (signal?.aborted) {
+      const aborted = new Error('The work was stopped.');
+      aborted.name = 'AbortError';
+      throw aborted;
+    }
     if (err && err.name === 'AbortError') {
       throw new TranslateError('The translator took too long to answer.', 504);
     }
     throw new TranslateError('The translator could not be reached.', 502);
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener?.('abort', onAbort);
   }
 
   // The translator answers an error with a page of HTML, not with JSON —
@@ -265,18 +285,20 @@ function rememberClient(client) {
  * @param {string} target
  * @param {object} [options]
  * @param {typeof fetch} [options.fetchImpl]
+ * @param {AbortSignal} [options.signal]
  * @returns {Promise<{ text: string, detected: string }>}
  */
-export async function translateText(text, target, { fetchImpl = fetch } = {}) {
+export async function translateText(text, target, { fetchImpl = fetch, signal } = {}) {
   let lastError = null;
 
   for (const client of clientOrder()) {
     try {
-      const answer = await translateWithClient(text, target, client, { fetchImpl });
+      const answer = await translateWithClient(text, target, client, { fetchImpl, signal });
       rememberClient(client);
       return answer;
     } catch (err) {
       lastError = err;
+      if (err?.name === 'AbortError') throw err;
 
       // Only a refusal is worth another client: every other failure would
       // fail the same way again.
@@ -425,9 +447,19 @@ export function splitLongUnit(unit) {
  * @param {(progress: { done: number, total: number }) => void} [options.onProgress]
  * @returns {Promise<{ results: string[], detected: string }>}
  */
-export async function translateUnits(units, target, { fetchImpl = fetch, onProgress } = {}) {
+export async function translateUnits(
+  units,
+  target,
+  { fetchImpl = fetch, onProgress, signal } = {}
+) {
   if (!Array.isArray(units) || units.length === 0) {
     return { results: [], detected: '' };
+  }
+
+  if (signal?.aborted) {
+    const error = new Error('The work was stopped.');
+    error.name = 'AbortError';
+    throw error;
   }
 
   const groups = groupUnits(units);
@@ -439,10 +471,16 @@ export async function translateUnits(units, target, { fetchImpl = fetch, onProgr
   let detected = '';
 
   for (let index = 0; index < groups.length; index += 1) {
+    if (signal?.aborted) {
+      const error = new Error('The work was stopped.');
+      error.name = 'AbortError';
+      throw error;
+    }
+
     const group = groups[index];
     const joined = group.map((piece) => piece.text).join(` ${SEPARATOR} `);
 
-    const answer = await translateWithRetry(joined, target, fetchImpl);
+    const answer = await translateWithRetry(joined, target, fetchImpl, signal);
     const split = splitUnits(answer.text, group.length);
 
     if (!split) {
@@ -450,7 +488,7 @@ export async function translateUnits(units, target, { fetchImpl = fetch, onProgr
       // asked for on its own, which is slower but keeps them in their
       // places.
       for (const piece of group) {
-        const single = await translateWithRetry(piece.text, target, fetchImpl);
+        const single = await translateWithRetry(piece.text, target, fetchImpl, signal);
         appendAnswer(answers, piece.unit, single.text);
         if (!detected) detected = single.detected;
       }
@@ -500,8 +538,8 @@ function appendAnswer(answers, unit, text) {
  * @param {typeof fetch} fetchImpl
  * @returns {Promise<{ text: string, detected: string }>}
  */
-async function translateWithRetry(text, target, fetchImpl) {
-  return translateText(text, target, { fetchImpl });
+async function translateWithRetry(text, target, fetchImpl, signal) {
+  return translateText(text, target, { fetchImpl, signal });
 }
 
 /**

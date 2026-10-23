@@ -33,6 +33,7 @@
 
 import { getSettings } from '@/core/settings.js';
 import { announceNarrationStart, onOtherTabNarrationStart } from '@/core/multi-tab.js';
+import { TTS_WINDOW_CHARS } from '@/core/schedule.js';
 
 // Module-level persistent state (Immune to Garbage Collection)
 let speakDebounceTimer = null;
@@ -67,6 +68,21 @@ let fullSpeechText = '';
 let tokensAreStale = true;
 let documentLocale = 'en-US';
 
+// Windowed tokenization
+/** Top-level preview blocks that can be spoken, in document order. */
+let speechBlocks = [];
+/** The blocks whose words are currently in the token table. */
+let tokenizedBlocks = new Set();
+/** The first and last block covered by the current token window. */
+let windowStartBlock = 0;
+let windowEndBlock = -1;
+/** Whether blocks remain outside the current window. */
+let hasMoreSpeech = false;
+/** A cheap approximation of the whole document's word count. */
+let estimatedTotalWords = 0;
+/** The DOM walk behind the estimate, made once per document change. */
+let cachedWordEstimate = 0;
+
 // Active settings
 let currentVoice = null;
 let currentRate = 1.0;
@@ -78,6 +94,8 @@ let scrollContainerRef = null;
 
 /** Whether the preview follows the word being spoken. */
 let autoScrollEnabled = true;
+/** When the narrator last moved the preview by itself. */
+let lastAutoScrollAt = 0;
 
 // Event listeners / callbacks
 const stateListeners = new Set();
@@ -102,12 +120,28 @@ export function onTTSStateChange(listener) {
 }
 
 function notifyState(detail = {}) {
+  const token = tokens[currentWordIndex];
+  const withinWindow =
+    fullSpeechText.length > 0 && token ? token.charEnd / fullSpeechText.length : 0;
+  const progress =
+    windowEndBlock >= 0 && speechBlocks.length > 0
+      ? Math.min(
+          1,
+          (windowStartBlock + withinWindow * Math.max(1, windowEndBlock - windowStartBlock)) /
+            speechBlocks.length
+        )
+      : tokens.length > 0
+        ? Math.max(0, currentWordIndex) / tokens.length
+        : 0;
+
   const state = {
     isPlaying,
     isPaused,
     starting: isStarting,
     currentWordIndex,
-    totalWords: tokens.length,
+    totalWords: estimatedTotalWords || tokens.length,
+    totalWordsEstimated: estimatedTotalWords > 0,
+    progress,
     currentVoice,
     rate: currentRate,
     ...detail
@@ -217,6 +251,7 @@ export function setScrollContainer(el) {
  */
 export function setPreviewContainer(el) {
   previewContainerRef = el || null;
+  cachedWordEstimate = 0;
 }
 
 /**
@@ -391,29 +426,43 @@ export function buildChunks(text, locale = 'en-US', rate = currentRate) {
 const TIME_ALONE = /^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*$/;
 
 /**
- * Tokenizes the rendered preview into speakable words.
+ * Tokenizes rendered preview text into speakable words.
  *
- * This is deliberately NOT called on every keystroke: the preview module marks
- * the tokens stale and asks for them lazily (see `ensureTokens`).
+ * A full pass is used by the explicit `ensureTokens()` API and by the tests.
+ * The narrator itself passes a small list of top-level blocks so a book is
+ * never walked from beginning to end before the first sentence.
  *
  * @param {HTMLElement} rootContainer
  * @param {string} locale
+ * @param {object} [options]
+ * @param {HTMLElement[]|null} [options.blocks]
+ * @param {boolean} [options.append]
+ * @param {number} [options.totalWords]
  */
-function tokenizeDOMForTTS(rootContainer, locale = 'en-US') {
+function tokenizeDOMForTTS(
+  rootContainer,
+  locale = 'en-US',
+  { blocks = null, append = false, totalWords = 0 } = {}
+) {
   previewContainerRef = rootContainer;
   documentLocale = locale;
-  tokens = [];
-  tokenIndexById = new Map();
-  fullSpeechText = '';
-  currentWordIndex = -1;
+
+  const previousTokenized = tokenizedBlocks;
+
+  if (!append) {
+    tokens = [];
+    tokenIndexById = new Map();
+    fullSpeechText = '';
+    currentWordIndex = -1;
+    tokenizedBlocks = new Set();
+    estimatedTotalWords = 0;
+  }
 
   if (!rootContainer) {
     tokensAreStale = false;
     notifyState({ totalWords: 0 });
     return { tokens, fullSpeechText };
   }
-
-  unwrapTokenSpans(rootContainer);
 
   let segmenter;
   try {
@@ -423,7 +472,20 @@ function tokenizeDOMForTTS(rootContainer, locale = 'en-US') {
     segmenter = new Intl.Segmenter('en', { granularity: 'word' });
   }
 
-  let wordCounter = 0;
+  let wordCounter = append ? tokens.length : 0;
+  const targets = blocks && blocks.length > 0 ? blocks : [rootContainer];
+
+  if (!append) {
+    if (blocks && previousTokenized.size > 0) {
+      previousTokenized.forEach((node) => {
+        if (node?.isConnected) unwrapTokenSpans(node);
+      });
+    } else {
+      unwrapTokenSpans(rootContainer);
+    }
+  } else {
+    targets.forEach((target) => unwrapTokenSpans(target));
+  }
 
   const isSkipNode = (node) => {
     if (!node || !node.parentElement) return false;
@@ -460,9 +522,11 @@ function tokenizeDOMForTTS(rootContainer, locale = 'en-US') {
     return false;
   };
 
-  // Math formulas are read as one cohesive token
-  const mathElements = rootContainer.querySelectorAll('[data-math="true"]');
-  mathElements.forEach((mathEl) => {
+  // A formula is read as one cohesive token, at the place where it sits in
+  // the document. Reading every formula before the prose would make the
+  // narration begin with a formula from somewhere in the middle of the page,
+  // and the highlight (and its follow-scroll) would jump there first.
+  const addMathToken = (mathEl) => {
     const formula = mathEl.getAttribute('data-formula') || 'formula';
     const wordId = wordCounter++;
     mathEl.classList.add('tts-word', 'tts-math-token');
@@ -484,80 +548,113 @@ function tokenizeDOMForTTS(rootContainer, locale = 'en-US') {
       charEnd
     });
     tokenIndexById.set(wordId, tokens.length - 1);
-  });
+  };
 
-  // Discover all readable text nodes
-  const walker = document.createTreeWalker(rootContainer, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) => {
-      if (isSkipNode(node)) return NodeFilter.FILTER_REJECT;
-      return NodeFilter.FILTER_ACCEPT;
-    }
-  });
+  for (const target of targets) {
+    if (!target || !target.isConnected) continue;
+    tokenizedBlocks.add(target);
 
-  const textNodes = [];
-  let currentNode = walker.nextNode();
-  while (currentNode) {
-    textNodes.push(currentNode);
-    currentNode = walker.nextNode();
-  }
-
-  for (const textNode of textNodes) {
-    const originalText = textNode.textContent;
-    if (!originalText) continue;
-
-    const parentBlock = textNode.parentElement?.closest(
-      'h1, h2, h3, h4, h5, h6, p, li, blockquote, tr'
+    const walker = document.createTreeWalker(
+      target,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            if (node.matches?.('[data-math="true"]')) return NodeFilter.FILTER_ACCEPT;
+            // Skip whole subtrees whose words are never read, but keep
+            // descending into the rest.
+            if (
+              node.matches?.(
+                'script, style, .mermaid-source, .code-head, .code-gutter, .heading-anchor'
+              )
+            ) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_SKIP;
+          }
+          if (isSkipNode(node)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
     );
-    if (
-      parentBlock &&
-      fullSpeechText.length > 0 &&
-      !fullSpeechText.endsWith('\n') &&
-      !fullSpeechText.endsWith(' ')
-    ) {
-      fullSpeechText += ' ';
+
+    const readableNodes = [];
+    let currentNode = walker.nextNode();
+    while (currentNode) {
+      readableNodes.push(currentNode);
+      currentNode = walker.nextNode();
     }
 
-    const segments = segmenter.segment(originalText);
-    const fragment = document.createDocumentFragment();
-    let hasTokens = false;
+    for (const node of readableNodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        addMathToken(node);
+        continue;
+      }
 
-    for (const seg of segments) {
-      const segText = seg.segment;
+      const textNode = node;
+      const originalText = textNode.textContent;
+      if (!originalText) continue;
 
-      if (seg.isWordLike) {
-        hasTokens = true;
-        const wordId = wordCounter++;
-        const span = document.createElement('span');
-        span.className = 'tts-word';
-        span.setAttribute('data-word-id', wordId.toString());
-        span.textContent = segText;
-        fragment.appendChild(span);
+      const parentBlock = textNode.parentElement?.closest(
+        'h1, h2, h3, h4, h5, h6, p, li, blockquote, tr'
+      );
+      if (
+        parentBlock &&
+        fullSpeechText.length > 0 &&
+        !fullSpeechText.endsWith('\n') &&
+        !fullSpeechText.endsWith(' ')
+      ) {
+        fullSpeechText += ' ';
+      }
 
-        const charStart = fullSpeechText.length;
-        fullSpeechText += segText;
-        const charEnd = fullSpeechText.length;
+      const segments = segmenter.segment(originalText);
+      const fragment = document.createDocumentFragment();
+      let hasTokens = false;
 
-        tokens.push({
-          id: wordId,
-          element: span,
-          text: segText,
-          charStart,
-          charEnd
-        });
-        tokenIndexById.set(wordId, tokens.length - 1);
-      } else {
-        fragment.appendChild(document.createTextNode(segText));
-        fullSpeechText += segText;
+      for (const seg of segments) {
+        const segText = seg.segment;
+
+        if (seg.isWordLike) {
+          hasTokens = true;
+          const wordId = wordCounter++;
+          const span = document.createElement('span');
+          span.className = 'tts-word';
+          span.setAttribute('data-word-id', wordId.toString());
+          span.textContent = segText;
+          fragment.appendChild(span);
+
+          const charStart = fullSpeechText.length;
+          fullSpeechText += segText;
+          const charEnd = fullSpeechText.length;
+
+          tokens.push({
+            id: wordId,
+            element: span,
+            text: segText,
+            charStart,
+            charEnd
+          });
+          tokenIndexById.set(wordId, tokens.length - 1);
+        } else {
+          fragment.appendChild(document.createTextNode(segText));
+          fullSpeechText += segText;
+        }
+      }
+
+      if (hasTokens && textNode.parentNode) {
+        textNode.parentNode.replaceChild(fragment, textNode);
       }
     }
+  }
 
-    if (hasTokens && textNode.parentNode) {
-      textNode.parentNode.replaceChild(fragment, textNode);
-    }
+  if (!append) {
+    estimatedTotalWords = blocks ? Math.max(totalWords, tokens.length) : 0;
+  } else if (totalWords > 0) {
+    estimatedTotalWords = Math.max(estimatedTotalWords, totalWords);
   }
 
   tokensAreStale = false;
-  notifyState({ totalWords: tokens.length });
+  notifyState({ totalWords: estimatedTotalWords || tokens.length });
   return { tokens, fullSpeechText };
 }
 
@@ -585,6 +682,232 @@ export function ensureTokens() {
 }
 
 /**
+ * Tells whether a top-level preview node can carry speech.
+ * @param {Node} node
+ * @returns {boolean}
+ */
+function isSpeakableBlock(node) {
+  if (!(node instanceof HTMLElement)) return false;
+  if (!node.textContent || !node.textContent.trim()) return false;
+  if (node.matches('hr, script, style, .heading-anchor')) return false;
+  return true;
+}
+
+/**
+ * The top-level blocks of the preview that carry speakable text.
+ *
+ * @param {HTMLElement|null} root
+ * @returns {HTMLElement[]}
+ */
+function collectSpeechBlocks(root) {
+  if (!root) return [];
+  return Array.from(root.children).filter(isSpeakableBlock);
+}
+
+/**
+ * A cheap estimate of the whole document's word count.
+ *
+ * The exact number is only known after the document has been tokenized. The
+ * player uses this estimate so the progress bar cannot imply that the current
+ * window is the whole book.
+ *
+ * @param {HTMLElement|null} root
+ * @returns {number}
+ */
+function estimateWordCount(root) {
+  // Reading the text of the whole preview for every window would defeat the
+  // windowing itself. The document changes only when the tokens are marked
+  // stale, so the walk is made once per version.
+  if (cachedWordEstimate > 0) return cachedWordEstimate;
+
+  const text = root?.textContent || '';
+  cachedWordEstimate = Math.max(1, Math.ceil(text.length / 6));
+  return cachedWordEstimate;
+}
+
+/**
+ * The speech block that contains an element.
+ *
+ * @param {HTMLElement|null} element
+ * @returns {number}
+ */
+function blockIndexForElement(element) {
+  if (!element || !previewContainerRef) return -1;
+
+  let node = element;
+  while (node && node.parentElement !== previewContainerRef) {
+    node = node.parentElement;
+  }
+
+  return node ? speechBlocks.indexOf(node) : -1;
+}
+
+/**
+ * Chooses the last block of a window that starts at `start`.
+ * @param {number} start
+ * @returns {number}
+ */
+function chooseWindowEnd(start) {
+  let end = start;
+  let chars = 0;
+
+  while (end < speechBlocks.length) {
+    chars += speechBlocks[end].textContent?.length || 0;
+    end += 1;
+    if (end - start >= 4 && chars >= TTS_WINDOW_CHARS) break;
+  }
+
+  return Math.min(speechBlocks.length, Math.max(start + 1, end));
+}
+
+/**
+ * Tokenizes a window of blocks, replacing the current token table.
+ *
+ * @param {number} start
+ * @param {number} end
+ */
+function resetTokenWindow(start, end) {
+  windowStartBlock = Math.max(0, start);
+  windowEndBlock = Math.min(speechBlocks.length, end);
+  hasMoreSpeech = windowEndBlock < speechBlocks.length;
+
+  tokenizeDOMForTTS(previewContainerRef, documentLocale, {
+    blocks: speechBlocks.slice(windowStartBlock, windowEndBlock),
+    totalWords: estimateWordCount(previewContainerRef)
+  });
+}
+
+/**
+ * Starts a token window around an element the reader pointed at.
+ *
+ * @param {HTMLElement|null} element
+ * @returns {boolean} whether a token was produced
+ */
+function ensureTokenWindowAt(element) {
+  if (!previewContainerRef) return false;
+
+  speechBlocks = collectSpeechBlocks(previewContainerRef);
+  if (speechBlocks.length === 0) return false;
+
+  let index = blockIndexForElement(element);
+  if (index < 0) index = 0;
+
+  resetTokenWindow(index, chooseWindowEnd(index));
+  return tokens.length > 0;
+}
+
+/**
+ * Starts the window at the first block the reader can see.
+ *
+ * @returns {boolean} whether a token was produced
+ */
+function ensureStartWindow() {
+  if (!previewContainerRef) return false;
+  if (!tokensAreStale && tokens.length > 0) return true;
+
+  speechBlocks = collectSpeechBlocks(previewContainerRef);
+  if (speechBlocks.length === 0) return false;
+
+  let index = 0;
+  const scroller = scrollContainerRef;
+
+  if (scroller && typeof scroller.getBoundingClientRect === 'function') {
+    const top = scroller.getBoundingClientRect().top + 48;
+
+    for (let block = 0; block < speechBlocks.length; block += 1) {
+      const rect = speechBlocks[block].getBoundingClientRect();
+      if (rect.bottom > top) {
+        index = block;
+        break;
+      }
+    }
+  }
+
+  resetTokenWindow(index, chooseWindowEnd(index));
+  return tokens.length > 0;
+}
+
+/**
+ * Appends the next window while the reader is still speaking.
+ *
+ * @returns {boolean} whether more text was added
+ */
+function extendTokenWindow() {
+  if (!hasMoreSpeech) return false;
+
+  const start = windowEndBlock;
+  const end = chooseWindowEnd(start);
+  if (end <= start) {
+    hasMoreSpeech = false;
+    return false;
+  }
+
+  const oldLength = fullSpeechText.length;
+  tokenizeDOMForTTS(previewContainerRef, documentLocale, {
+    blocks: speechBlocks.slice(start, end),
+    append: true,
+    totalWords: estimateWordCount(previewContainerRef)
+  });
+
+  windowEndBlock = end;
+  hasMoreSpeech = end < speechBlocks.length;
+  appendChunksForNewText(oldLength);
+  return true;
+}
+
+/**
+ * Adds chunks for speech text that was tokenized after playback started.
+ *
+ * @param {number} from character offset in `fullSpeechText`
+ */
+function appendChunksForNewText(from) {
+  const text = fullSpeechText.slice(from);
+  if (!text.trim()) return;
+
+  const fresh = buildChunks(text, documentLocale, currentRate);
+  for (const chunk of fresh) {
+    chunkQueue.push({
+      ...chunk,
+      charStart: chunk.charStart + from,
+      charEnd: chunk.charEnd + from
+    });
+  }
+}
+
+/**
+ * Re-reads the preview's speech blocks after a progressive render appended
+ * more content.
+ */
+export function refreshSpeechBlocks() {
+  if (!previewContainerRef) return;
+
+  const next = collectSpeechBlocks(previewContainerRef);
+  if (next.length === speechBlocks.length) return;
+
+  speechBlocks = next;
+  hasMoreSpeech = windowEndBlock < speechBlocks.length;
+}
+
+/**
+ * Adds newly rendered top-level blocks without walking the whole preview.
+ *
+ * @param {Node[]} nodes
+ */
+export function appendSpeechBlocks(nodes) {
+  if (!nodes || nodes.length === 0) return;
+  if (speechBlocks.length === 0) {
+    refreshSpeechBlocks();
+    return;
+  }
+
+  for (const node of nodes) {
+    if (isSpeakableBlock(node)) speechBlocks.push(node);
+  }
+
+  hasMoreSpeech = windowEndBlock < speechBlocks.length;
+}
+
+/**
  * Marks the token table as outdated.
  *
  * MUST be called *before* the preview DOM is replaced. If narration is
@@ -595,6 +918,11 @@ export function ensureTokens() {
  */
 export function markTokensStale(reason = 'content-changed') {
   tokensAreStale = true;
+  windowStartBlock = 0;
+  windowEndBlock = -1;
+  hasMoreSpeech = false;
+  estimatedTotalWords = 0;
+  cachedWordEstimate = 0;
   if (isPlaying || isPaused) {
     stop(reason);
   }
@@ -693,7 +1021,16 @@ function scrollWordIntoView(el) {
 
   const delta = elRect.top - scrollerRect.top - scroller.clientHeight / 2 + elRect.height / 2;
   const target = Math.max(0, scroller.scrollTop + delta);
+  lastAutoScrollAt = Date.now();
   scroller.scrollTo({ top: target, behavior: 'smooth' });
+}
+
+/**
+ * @param {number} [windowMs]
+ * @returns {boolean} whether the narrator moved the preview recently
+ */
+export function wasRecentlyAutoScrolling(windowMs = 900) {
+  return Date.now() - lastAutoScrollAt < windowMs;
 }
 
 /* ==========================================================================
@@ -767,13 +1104,26 @@ function prepareChunks(startChar) {
 function pumpChunks(sessionId) {
   if (sessionId !== currentSessionId) return;
 
+  // The token window is filled just in time. No full-document pass is made
+  // before the first sentence can be heard.
+  if (
+    hasMoreSpeech &&
+    chunkCursor + PREFETCH_DEPTH >= chunkQueue.length
+  ) {
+    extendTokenWindow();
+  }
+
+  while (chunkCursor >= chunkQueue.length && hasMoreSpeech) {
+    if (!extendTokenWindow()) break;
+  }
+
   while (chunkCursor - chunkDone < PREFETCH_DEPTH && chunkCursor < chunkQueue.length) {
     const index = chunkCursor;
     chunkCursor += 1;
     speakChunk(chunkQueue[index], index, sessionId);
   }
 
-  if (chunkDone >= chunkQueue.length && chunkCursor >= chunkQueue.length) {
+  if (chunkDone >= chunkQueue.length && chunkCursor >= chunkQueue.length && !hasMoreSpeech) {
     finishPlayback();
   }
 }
@@ -953,6 +1303,15 @@ function finishPlayback() {
   chunkDone = 0;
   chunkRetries = 0;
   setActiveWord(-1);
+
+  // A finished session is not a prepared window any more: pressing Play
+  // again must start from what the reader can see now, not from the old
+  // session's first block.
+  tokensAreStale = true;
+  windowStartBlock = 0;
+  windowEndBlock = -1;
+  hasMoreSpeech = false;
+
   isPlaying = false;
   isPaused = false;
   isStarting = false;
@@ -973,7 +1332,9 @@ function speakFromWord(wordIndex = 0) {
     return;
   }
 
-  ensureTokens();
+  if (tokensAreStale || tokens.length === 0) {
+    if (!ensureStartWindow()) return;
+  }
   if (tokens.length === 0) return;
 
   const targetIndex = Math.max(0, Math.min(tokens.length - 1, wordIndex));
@@ -1038,7 +1399,11 @@ export function play() {
     notifyState({ starting: true });
   }
 
-  ensureTokens();
+  if (!ensureStartWindow()) {
+    isStarting = false;
+    notifyState({ starting: false });
+    return;
+  }
 
   if (isPaused) {
     const api = window.speechSynthesis;
@@ -1109,6 +1474,8 @@ function pauseForOtherTab() {
 export function stop(reason = 'user') {
   if (!('speechSynthesis' in window)) return;
   currentSessionId++;
+  tokensAreStale = true;
+  hasMoreSpeech = false;
   if (speakDebounceTimer) {
     clearTimeout(speakDebounceTimer);
     speakDebounceTimer = null;
@@ -1356,9 +1723,13 @@ export function initPlaybackWatchdog() {
 export function speakFromElement(element) {
   if (!element) return false;
 
-  ensureTokens();
+  let word = element.matches?.('.tts-word') ? element : element.querySelector?.('.tts-word');
 
-  const word = element.matches?.('.tts-word') ? element : element.querySelector?.('.tts-word');
+  if (!word) {
+    if (!ensureTokenWindowAt(element)) return false;
+    word = element.matches?.('.tts-word') ? element : element.querySelector?.('.tts-word');
+  }
+
   if (!word) return false;
 
   const id = Number.parseInt(word.getAttribute('data-word-id'), 10);
@@ -1375,16 +1746,22 @@ export function speakFromElement(element) {
  * @param {MouseEvent} event
  */
 export function handlePreviewClick(event) {
-  ensureTokens();
-
   const target = event.target;
-  let wordEl = target.closest?.('.tts-word');
+  if (!target?.closest) return;
 
-  if (!wordEl && target?.closest) {
+  let wordEl = target.closest('.tts-word');
+
+  if (!wordEl) {
     const parentBlock = target.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, tr');
-    if (parentBlock) {
-      wordEl = parentBlock.querySelector('.tts-word');
+
+    // The block has not been tokenized yet. Tokenize only this window, not
+    // the whole document; a click in chapter forty must not pay for chapters
+    // one to thirty-nine.
+    if (tokensAreStale || tokens.length === 0 || !parentBlock?.querySelector('.tts-word')) {
+      if (!ensureTokenWindowAt(parentBlock || target)) return;
     }
+
+    wordEl = parentBlock?.querySelector('.tts-word');
   }
 
   if (!wordEl) return;

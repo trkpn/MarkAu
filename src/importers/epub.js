@@ -14,33 +14,19 @@
  * ============================================================================
  */
 
-/**
- * The library that opens a zip file, loaded once.
- * @type {Promise<object>|null}
- */
-let fflatePromise = null;
-
-/**
- * Loads the library.
- * @returns {Promise<object>}
- */
-function loadFflate() {
-  if (!fflatePromise) {
-    fflatePromise = import('fflate').then((fflate) => fflate);
-  }
-
-  return fflatePromise;
-}
+import { unzipAsync } from '@/importers/zip.js';
+import { reportProgress, throwIfAborted, yieldToMainThread } from '@/core/schedule.js';
 
 /**
  * Opens a zip file.
  *
  * @param {Uint8Array} bytes
+ * @param {object} [options]
+ * @param {AbortSignal} [options.signal]
  * @returns {Promise<Record<string, Uint8Array>>} the files, by name
  */
-export async function unzip(bytes) {
-  const fflate = await loadFflate();
-  return fflate.unzipSync(bytes);
+export async function unzip(bytes, options = {}) {
+  return unzipAsync(bytes, options);
 }
 
 /**
@@ -95,11 +81,37 @@ export function readBookManifest(files) {
     .filter(Boolean)
     .map((id) => {
       const href = doc.querySelector(`manifest > item[id="${id}"]`)?.getAttribute('href');
-      return href ? base + href : null;
+      if (!href) return null;
+
+      try {
+        return decodeURIComponent(
+          new URL(href, `https://epub.invalid/${base}`).pathname.replace(/^\/+/, '')
+        );
+      } catch {
+        return base + href;
+      }
     })
     .filter(Boolean);
 
   return { opfPath, title, author, language, chapters };
+}
+
+/**
+ * Resolves one chapter against the address of the book.
+ *
+ * @param {string} chapter the path inside the archive
+ * @param {string} bookUrl where the book came from
+ * @returns {string}
+ */
+function chapterUrl(chapter, bookUrl) {
+  const base = String(bookUrl || '').trim();
+  if (!base || !/^https?:\/\//i.test(base)) return chapter;
+
+  try {
+    return new URL(chapter, base).href;
+  } catch {
+    return chapter;
+  }
 }
 
 /**
@@ -110,10 +122,18 @@ export function readBookManifest(files) {
  * @param {string} [options.url] where the book came from
  * @param {(html: string, baseUrl: string) => Promise<string>} options.toMarkdown
  *   the converter for a page of the book
+ * @param {(progress: { phase: string, done: number, total: number }) => void} [options.onProgress]
+ * @param {AbortSignal} [options.signal]
  * @returns {Promise<{ markdown: string, title: string, chapters: number }>}
  */
-export async function epubToMarkdown(bytes, { url = '', toMarkdown } = {}) {
-  const files = await unzip(bytes);
+export async function epubToMarkdown(
+  bytes,
+  { url = '', toMarkdown, onProgress, signal } = {}
+) {
+  reportProgress(onProgress, { phase: 'unpacking', done: 0, total: 1 });
+  const files = await unzip(bytes, { signal });
+  throwIfAborted(signal);
+
   const manifest = readBookManifest(files);
 
   if (!manifest) {
@@ -135,19 +155,31 @@ export async function epubToMarkdown(bytes, { url = '', toMarkdown } = {}) {
   }
 
   let written = 0;
+  const total = manifest.chapters.length;
+
+  reportProgress(onProgress, { phase: 'converting', done: 0, total });
 
   for (const path of manifest.chapters) {
+    throwIfAborted(signal);
+
     const file = files[path];
     if (!file) continue;
 
     const html = decodeText(file);
-    const markdown = toMarkdown ? await toMarkdown(html, url) : html;
+    const markdown = toMarkdown
+      ? await toMarkdown(html, chapterUrl(path, url))
+      : html;
     if (!markdown || !markdown.trim()) continue;
 
     lines.push(markdown);
     lines.push('');
     written += 1;
+
+    reportProgress(onProgress, { phase: 'converting', done: written, total });
+    await yieldToMainThread();
   }
+
+  throwIfAborted(signal);
 
   return {
     markdown: lines.join('\n').trim(),
