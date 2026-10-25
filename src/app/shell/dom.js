@@ -48,6 +48,7 @@ export const el = {
   btnPlay: document.getElementById('btn-play'),
   btnStop: document.getElementById('btn-stop'),
   voiceSelect: document.getElementById('voice-select'),
+  voiceSelectWrapper: document.querySelector('.voice-select-wrapper'),
   rateSlider: document.getElementById('rate-slider'),
   rateBadge: document.getElementById('rate-badge'),
   btnMic: document.getElementById('btn-mic'),
@@ -65,6 +66,10 @@ export const el = {
   btnSyncScroll: document.getElementById('btn-sync-scroll'),
   btnSplitAxis: document.getElementById('btn-split-axis'),
   btnTheme: document.getElementById('btn-theme'),
+  btnMore: document.getElementById('btn-more'),
+  headerMoreMenu: document.getElementById('header-more-menu'),
+  moreVoiceSlot: document.getElementById('more-voice-slot'),
+  moreVoiceSection: document.getElementById('more-voice-section'),
   btnSettings: document.getElementById('btn-settings'),
 
   // Settings modal
@@ -85,6 +90,7 @@ export const el = {
   checkDiagramLabels: document.getElementById('check-diagram-labels'),
   selectSyncMode: document.getElementById('select-sync-mode'),
   selectSpeechChunk: document.getElementById('select-speech-chunk'),
+  settingsVoiceSelect: document.getElementById('settings-voice-select'),
   selectSaveFormat: document.getElementById('select-save-format'),
   selectAutoSave: document.getElementById('select-auto-save'),
   selectHighlightMode: document.getElementById('select-highlight-mode'),
@@ -191,7 +197,17 @@ const ICON_MAPPINGS = {
   'icon-tab-edit': icons.edit,
   'icon-tab-split': icons.splitH,
   'icon-tab-preview': icons.eye,
-  'icon-split-axis': icons.splitH
+  'icon-split-axis': icons.splitH,
+  'icon-more': icons.more,
+  'icon-more-paste': icons.paste,
+  'icon-more-import': icons.link,
+  'icon-more-translate': icons.translate,
+  'icon-more-history': icons.history,
+  'icon-more-new-tab': icons.newTab,
+  'icon-more-copy': icons.copy,
+  'icon-more-print': icons.printer,
+  'icon-more-sample': icons.sparkles,
+  'icon-more-reset': icons.reset
 };
 
 /**

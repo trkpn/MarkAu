@@ -4,6 +4,8 @@
  * ============================================================================
  * The toolbar is always a single row. When the screen is too narrow, the
  * least important controls are hidden one by one until everything fits.
+ * A control that is hidden does not vanish: it reappears in the ⋯ menu
+ * (see app/shell/more-menu.js), so nothing is out of reach on a phone.
  *
  * Why measured instead of media queries: the toolbar contains text whose
  * width depends on the loaded font, on the chosen voice name and on the
@@ -14,12 +16,13 @@
  * Drop order (least important first):
  *   brand text → speed control → voice selector → tab labels →
  *   mic label → play label → sample button → copy button →
- *   paste button → history button → translate button → brand mark →
- *   network badge
+ *   import button → paste button → history button → translate button →
+ *   brand mark → network badge
  * ============================================================================
  */
 
 import { el } from '@/app/shell/dom.js';
+import { syncHeaderMoreMenu } from '@/app/shell/more-menu.js';
 
 /**
  * Each step hides one group of controls. `attr` is written to the header as
@@ -39,6 +42,7 @@ export const DROP_STEPS = [
   { attr: 'hidePrint', label: 'print button' },
   { attr: 'hideSample', label: 'sample button' },
   { attr: 'hideCopy', label: 'copy button' },
+  { attr: 'hideImportUrl', label: 'import button' },
   { attr: 'hidePaste', label: 'paste button' },
   { attr: 'hideHistory', label: 'history button' },
   { attr: 'hideTranslate', label: 'translate button' },
@@ -53,22 +57,16 @@ let frame = null;
 let timer = null;
 
 /**
- * The width the toolbar content needs in its current state.
- * @returns {number}
+ * Whether the header row still holds more content than it has room for.
+ * The header is the scroll container itself, so its `scrollWidth` is the
+ * ground truth — a computed estimate drifts a few pixels off the real
+ * layout, and a few pixels are the difference between fitting and
+ * shedding on a phone.
+ * @param {HTMLElement} header
+ * @returns {boolean}
  */
-function requiredWidth() {
-  const header = el.appHeader;
-  if (!header) return 0;
-
-  const style = getComputedStyle(header);
-  const gap = Number.parseFloat(style.columnGap) || 0;
-  const padding =
-    (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
-
-  const left = el.zoneLeft?.scrollWidth ?? 0;
-  const right = el.zoneRight?.scrollWidth ?? 0;
-
-  return left + right + gap + padding;
+function contentOverflows(header) {
+  return header.scrollWidth > header.clientWidth + 1;
 }
 
 /**
@@ -91,15 +89,24 @@ function updateDensity() {
   const header = el.appHeader;
   if (!header) return;
 
-  // Start from "everything visible" and hide step by step.
+  // Start from "everything visible" and hide step by step until the row
+  // really fits — the header's own overflow is the verdict.
   for (const step of DROP_STEPS) setStep(step.attr, false);
-
-  const available = header.clientWidth;
+  if (!contentOverflows(header)) return;
 
   for (const step of DROP_STEPS) {
-    if (requiredWidth() <= available) return; // fits — stop shedding
     setStep(step.attr, true);
+    if (!contentOverflows(header)) return;
   }
+}
+
+/**
+ * Recomputes the density and the overflow menu together — a control that is
+ * shed from the row reappears in the ⋯ menu, it is not lost.
+ */
+export function updateToolbarLayout() {
+  updateDensity();
+  syncHeaderMoreMenu();
 }
 
 /**
@@ -116,7 +123,7 @@ export function refreshToolbarDensity() {
     if (timer !== null) clearTimeout(timer);
     frame = null;
     timer = null;
-    updateDensity();
+    updateToolbarLayout();
   };
 
   frame = requestAnimationFrame(run);
@@ -137,6 +144,26 @@ export function initToolbar() {
 
   // The voice selector and the theme can change the toolbar's content.
   window.addEventListener('orientationchange', refreshToolbarDensity);
+
+  // iOS changes the viewport when its URL bar collapses, without firing a
+  // window resize the layout always follows. The header is observed
+  // directly, and the visual viewport covers the rest.
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(refreshToolbarDensity).observe(el.appHeader);
+    // The zones are flex-sized to their content: when that content changes
+    // after the first measurement — a late web font, the voice list filling
+    // in — the observer is what notices, so the shedding is never computed
+    // against a stale width.
+    if (el.zoneLeft) new ResizeObserver(refreshToolbarDensity).observe(el.zoneLeft);
+    if (el.zoneRight) new ResizeObserver(refreshToolbarDensity).observe(el.zoneRight);
+  }
+  window.visualViewport?.addEventListener('resize', refreshToolbarDensity, { passive: true });
+
+  // Rendering frames can be throttled or absent right after load — a
+  // background tab, an embedded view — so the observers and rAF cannot be
+  // the only safety net. A few delayed re-checks cover the layout that
+  // settles after the first measurement, whatever mechanism hides it.
+  [250, 750, 2000].forEach((delay) => setTimeout(refreshToolbarDensity, delay));
 
   refreshToolbarDensity();
 }

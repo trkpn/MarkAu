@@ -163,36 +163,56 @@ function notifyState(detail = {}) {
  * Voices
  * ========================================================================== */
 
+/** The in-flight voice wait, so concurrent callers share one poll. */
+let voicesWait = null;
+
 /**
- * Initializes and retrieves available voices, handling the asynchronous
- * `voiceschanged` event to avoid race conditions.
+ * Retrieves the available voices, waiting for the browser to supply them.
+ *
+ * Safari — on the iPhone above all — starts with an empty voice list and
+ * populates it late, sometimes without ever firing `voiceschanged` (the
+ * list often only appears after the first user gesture). Listening once
+ * with a one-second deadline therefore permanently showed "no voices".
+ * Instead the engine is polled until the list arrives or the patience
+ * runs out, and the caller can retry (see the voice selector).
+ *
+ * @param {{ timeoutMs?: number }} [options]
  * @returns {Promise<SpeechSynthesisVoice[]>}
  */
-export function getAvailableVoices() {
-  return new Promise((resolve) => {
-    if (!('speechSynthesis' in window)) {
-      resolve([]);
-      return;
-    }
+export function getAvailableVoices({ timeoutMs = 10000 } = {}) {
+  if (!('speechSynthesis' in window)) return Promise.resolve([]);
 
-    const voices = window.speechSynthesis.getVoices();
-    if (voices && voices.length > 0) {
-      resolve(voices);
-      return;
-    }
+  const voices = window.speechSynthesis.getVoices();
+  if (voices && voices.length > 0) return Promise.resolve(voices);
 
-    const onVoicesChanged = () => {
+  // One in-flight wait at a time: a retry during the wait joins it.
+  if (voicesWait) return voicesWait;
+
+  voicesWait = new Promise((resolve) => {
+    const finish = (result) => {
       window.speechSynthesis.removeEventListener('voiceschanged', onVoicesChanged);
-      resolve(window.speechSynthesis.getVoices());
+      clearInterval(poll);
+      clearTimeout(deadline);
+      // An empty result must not be cached — the next call tries again.
+      voicesWait = null;
+      resolve(result || []);
     };
+    const check = () => {
+      const found = window.speechSynthesis.getVoices();
+      if (found && found.length > 0) finish(found);
+    };
+    const onVoicesChanged = check;
+    const poll = setInterval(check, 500);
+    const deadline = setTimeout(
+      () => finish(window.speechSynthesis.getVoices()),
+      timeoutMs
+    );
 
     window.speechSynthesis.addEventListener('voiceschanged', onVoicesChanged);
-
-    setTimeout(() => {
-      window.speechSynthesis.removeEventListener('voiceschanged', onVoicesChanged);
-      resolve(window.speechSynthesis.getVoices() || []);
-    }, 1000);
+    check();
   });
+
+  return voicesWait;
 }
 
 /**

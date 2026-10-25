@@ -78,12 +78,10 @@ export async function pasteFromClipboard() {
   const { text, reason } = await readClipboardText();
 
   if (text === null) {
-    setMessage(
-      reason === 'unsupported'
-        ? 'This browser cannot read the clipboard — use Ctrl+V in the editor'
-        : 'Clipboard access denied — use Ctrl+V in the editor',
-      { tone: 'warn', ttl: 4000 }
-    );
+    // iOS Safari does not hand the clipboard over to a plain button, so
+    // the message alone would be a dead end. The fallback box is the way
+    // to paste on a phone: the system paste command works in any field.
+    openPasteFallback(reason);
     return;
   }
 
@@ -93,6 +91,85 @@ export async function pasteFromClipboard() {
   }
 
   pasteAsDocument(text);
+}
+
+/* ==========================================================================
+ * Manual paste fallback
+ * ========================================================================== */
+
+/** The open fallback dialog, created on first use. */
+let fallbackOverlay = null;
+
+/**
+ * Opens the manual paste box: a textarea the system paste command works
+ * in, and an Insert button that makes the text the new document.
+ * @param {string} [reason] why the clipboard could not be read
+ */
+function openPasteFallback(reason) {
+  const overlay = ensurePasteFallback();
+  const textarea = overlay.querySelector('.paste-fallback-text');
+
+  overlay.querySelector('.paste-fallback-hint').textContent =
+    reason === 'denied'
+      ? 'Clipboard access was denied. Tap the box, choose Paste from the menu that appears, then press Insert.'
+      : 'This browser does not hand the clipboard to a button. Tap the box, choose Paste from the menu that appears, then press Insert.';
+
+  textarea.value = '';
+  overlay.removeAttribute('hidden');
+  textarea.focus();
+}
+
+function closePasteFallback() {
+  fallbackOverlay?.setAttribute('hidden', '');
+}
+
+/**
+ * Builds the fallback dialog once and wires it up.
+ * @returns {HTMLElement}
+ */
+function ensurePasteFallback() {
+  if (fallbackOverlay) return fallbackOverlay;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-backdrop';
+  overlay.hidden = true;
+  overlay.innerHTML = `
+    <div class="modal-card paste-fallback-card" role="dialog" aria-modal="true" aria-labelledby="paste-fallback-title">
+      <div class="modal-header">
+        <div class="modal-title">
+          <h3 id="paste-fallback-title">Paste the clipboard</h3>
+        </div>
+      </div>
+      <div class="modal-body">
+        <p class="paste-fallback-hint"></p>
+        <textarea class="paste-fallback-text" rows="7" placeholder="Long-press here, then choose Paste"></textarea>
+        <div class="paste-fallback-actions">
+          <button class="btn" type="button" data-paste-cancel>Cancel</button>
+          <button class="btn btn-primary" type="button" data-paste-insert>Insert as the document</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const textarea = overlay.querySelector('.paste-fallback-text');
+
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) closePasteFallback();
+  });
+  overlay.querySelector('[data-paste-cancel]').addEventListener('click', closePasteFallback);
+  overlay.querySelector('[data-paste-insert]').addEventListener('click', () => {
+    const text = textarea.value;
+    closePasteFallback();
+    if (!pasteAsDocument(text)) {
+      setMessage('Nothing was pasted', { tone: 'muted', ttl: 2500 });
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !overlay.hasAttribute('hidden')) closePasteFallback();
+  });
+
+  fallbackOverlay = overlay;
+  return overlay;
 }
 
 /**

@@ -1678,6 +1678,44 @@
     padding: 0 0.75rem;
   }
 
+  /* --------------------------------------------------- manual paste box --
+     The fallback for browsers that do not hand the clipboard to a button
+     (iOS Safari): the system paste command works inside any field. */
+  .paste-fallback-card {
+    max-width: 30rem;
+  }
+
+  .paste-fallback-hint {
+    font-size: 0.82rem;
+    color: var(--ma-fg-2);
+    line-height: 1.5;
+  }
+
+  .paste-fallback-text {
+    width: 100%;
+    min-height: 8rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--ma-border);
+    border-radius: 8px;
+    background: var(--ma-bg);
+    color: var(--ma-fg);
+    font-family: var(--ma-font-editor);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    resize: vertical;
+  }
+
+  .paste-fallback-text:focus {
+    outline: none;
+    border-color: var(--ma-border-focus);
+  }
+
+  .paste-fallback-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+
   /* A compact slider row: the range keeps a sensible width instead of
      stretching across the whole dialog. */
   .slider-row {
@@ -2146,6 +2184,10 @@
     display: none;
   }
 
+  .app-header[data-hide-import-url='true'] #btn-import-url {
+    display: none;
+  }
+
   .app-header[data-hide-paste='true'] #btn-paste {
     display: none;
   }
@@ -2203,6 +2245,98 @@
 
   .app-header[data-hide-tab-labels='true'] .view-tabs .tab-btn {
     padding: 0 0.45rem;
+  }
+
+  /* --------------------------------------------------- header overflow menu
+     The ⋯ button appears when the density system has shed a control into
+     the menu; the menu mirrors each shed control as a tappable item. */
+  .app-header #btn-more {
+    display: none;
+  }
+
+  .app-header[data-show-more='true'] #btn-more {
+    display: inline-flex;
+  }
+
+  .header-more-menu {
+    position: fixed;
+    top: 3.1rem;
+    right: 0.5rem;
+    z-index: 90;
+    min-width: 13rem;
+    max-height: min(24rem, calc(100dvh - 4rem));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.35rem;
+    border: 1px solid var(--ma-border);
+    border-radius: 0.75rem;
+    background: var(--ma-surface);
+    box-shadow: var(--ma-shadow-lg);
+  }
+
+  .header-more-menu[hidden] {
+    display: none;
+  }
+
+  .more-menu-section {
+    padding: 0.4rem 0.5rem 0.5rem;
+    border-bottom: 1px solid var(--ma-border);
+    margin-bottom: 0.35rem;
+  }
+
+  .more-menu-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ma-fg-2);
+    margin-bottom: 0.3rem;
+  }
+
+  .more-voice-slot .select-control {
+    width: 100%;
+  }
+
+  .more-item {
+    display: none;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.5rem 0.5rem;
+    border: none;
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--ma-fg);
+    font-size: 0.9rem;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .more-item:hover,
+  .more-item:active {
+    background: var(--ma-bg-3);
+  }
+
+  .more-item-danger {
+    color: var(--ma-danger, #ef4444);
+  }
+
+  /* A menu item appears exactly when its header button was shed — the same
+     data-hide-* attribute drives both sides. */
+  .app-header[data-show-more='true'][data-hide-paste='true'] .more-item[data-target='btn-paste'],
+  .app-header[data-show-more='true'][data-hide-import-url='true']
+    .more-item[data-target='btn-import-url'],
+  .app-header[data-show-more='true'][data-hide-translate='true']
+    .more-item[data-target='btn-translate'],
+  .app-header[data-show-more='true'][data-hide-history='true']
+    .more-item[data-target='btn-history'],
+  .app-header[data-show-more='true'][data-hide-new-tab='true']
+    .more-item[data-target='btn-new-tab'],
+  .app-header[data-show-more='true'][data-hide-copy='true'] .more-item[data-target='btn-copy'],
+  .app-header[data-show-more='true'][data-hide-print='true'] .more-item[data-target='btn-print'],
+  .app-header[data-show-more='true'][data-hide-sample='true'] .more-item[data-target='btn-sample'],
+  .app-header[data-show-more='true'][data-hide-reset='true'] .more-item[data-target='btn-reset'] {
+    display: flex;
   }
 
   /* Footer: the parts of the document go first, then the ones of the

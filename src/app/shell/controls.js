@@ -24,6 +24,7 @@ import {
   onSTTStateChange
 } from '@/speech/stt.js';
 import { getSettings, saveSettings, onSettingsChange } from '@/core/settings.js';
+import { refreshToolbarDensity } from '@/app/shell/toolbar.js';
 import {
   setBaseMessage,
   setMessage,
@@ -153,18 +154,45 @@ function initTransport() {
 
 /* ==========================================================================
  * Voice selection
+ * ==========================================================================
+ * iOS Safari populates the voice list late — sometimes only after the
+ * first user gesture — so the selector keeps listening and retrying
+ * instead of giving up after one attempt. The header select and the
+ * picker in the preferences share one population routine and stay in
+ * step through the saved settings.
  * ========================================================================== */
 
-async function initVoiceSelector() {
-  const voices = await getAvailableVoices();
-  if (!el.voiceSelect) return;
+/** The voices currently known to the selectors. */
+let voicesCache = [];
+/** The voice name that was last applied to the engine. */
+let appliedVoiceName = null;
 
-  el.voiceSelect.innerHTML = '';
+/**
+ * Picks a sensible default: Thai first, then English, then multilingual.
+ * @param {SpeechSynthesisVoice[]} voices
+ * @returns {SpeechSynthesisVoice|null}
+ */
+function pickDefaultVoice(voices) {
+  const groups = groupVoices(voices);
+  const preferred = groups.thai[0] ?? groups.english[0] ?? groups.multilingual[0] ?? groups.other[0];
+  return preferred ? preferred.voice : null;
+}
+
+/**
+ * Fills a voice <select> with the grouped voice list.
+ * @param {HTMLSelectElement} select
+ * @param {SpeechSynthesisVoice[]} voices
+ */
+function fillVoiceOptions(select, voices) {
+  if (!select) return;
+
+  select.innerHTML = '';
 
   if (voices.length === 0) {
     const option = document.createElement('option');
-    option.textContent = 'No synthesis voices detected';
-    el.voiceSelect.appendChild(option);
+    option.value = '';
+    option.textContent = 'Loading voices…';
+    select.appendChild(option);
     return;
   }
 
@@ -174,40 +202,156 @@ async function initVoiceSelector() {
     if (list.length === 0) return;
     const group = document.createElement('optgroup');
     group.label = label;
-    list.forEach(({ voice, index }) => {
+    list.forEach(({ voice }) => {
       const option = document.createElement('option');
-      option.value = index.toString();
+      option.value = voice.name;
       option.textContent = `${voice.name} (${voice.lang})`;
       group.appendChild(option);
     });
-    el.voiceSelect.appendChild(group);
+    select.appendChild(group);
   };
 
   appendGroup('🇹🇭 Thai Voices', groups.thai);
   appendGroup('🌐 Multilingual Voices', groups.multilingual);
   appendGroup('🇺🇸 English Voices', groups.english);
   appendGroup('🗣️ Other Languages', groups.other);
+}
 
-  let defaultIndex = 0;
-  if (groups.thai.length > 0) defaultIndex = groups.thai[0].index;
-  else if (groups.english.length > 0) defaultIndex = groups.english[0].index;
-  else if (groups.multilingual.length > 0) defaultIndex = groups.multilingual[0].index;
+/**
+ * Puts both voice selects on the saved voice, or on the first option when
+ * the saved one is not among the voices this browser offers.
+ */
+function syncVoiceSelects() {
+  const savedName = getSettings().voiceName;
+  for (const select of [el.voiceSelect, el.settingsVoiceSelect]) {
+    if (!select) continue;
+    if (savedName && voicesCache.some((voice) => voice.name === savedName)) {
+      select.value = savedName;
+    } else if (select.options.length > 0) {
+      select.selectedIndex = 0;
+    }
+  }
+}
 
-  const savedVoiceName = getSettings().voiceName;
-  if (savedVoiceName) {
-    const found = voices.findIndex((voice) => voice.name === savedVoiceName);
-    if (found >= 0) defaultIndex = found;
+/**
+ * Applies a voice list to the selectors. When the list brings the voice
+ * the engine should use, it is applied — but a voice that is already
+ * active is left alone, so a late list never restarts a running reading.
+ * @param {SpeechSynthesisVoice[]} voices
+ * @returns {boolean} whether any voices were found
+ */
+function applyVoices(voices) {
+  voicesCache = voices;
+
+  for (const select of [el.voiceSelect, el.settingsVoiceSelect]) {
+    fillVoiceOptions(select, voices);
   }
 
-  el.voiceSelect.value = defaultIndex.toString();
-  setVoice(voices[defaultIndex]);
+  if (voices.length === 0) {
+    syncVoiceSelects();
+    return false;
+  }
 
-  el.voiceSelect.addEventListener('change', () => {
-    const chosen = voices[Number.parseInt(el.voiceSelect.value, 10)];
-    if (!chosen) return;
-    saveSettings({ voiceName: chosen.name });
-    setVoice(chosen);
+  const savedName = getSettings().voiceName;
+  const voice =
+    voices.find((candidate) => candidate.name === savedName) ?? pickDefaultVoice(voices);
+
+  if (voice && voice.name !== appliedVoiceName) {
+    appliedVoiceName = voice.name;
+    setVoice(voice);
+  }
+
+  syncVoiceSelects();
+  // A filled selector is wider than the loading placeholder.
+  refreshToolbarDensity();
+  return true;
+}
+
+/**
+ * Marks the selects as permanently empty — every retry has failed.
+ */
+function markVoicesMissing() {
+  voicesCache = [];
+  for (const select of [el.voiceSelect, el.settingsVoiceSelect]) {
+    if (!select) continue;
+    select.innerHTML = '';
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No synthesis voices on this device';
+    select.appendChild(option);
+  }
+  refreshToolbarDensity();
+}
+
+/**
+ * Initializes the voice selectors.
+ *
+ * The wait is deliberately not awaited: on a phone the first list can take
+ * seconds, and the rest of the header must not stand behind it. The
+ * selectors start with a loading placeholder and fill themselves in when
+ * the voices arrive — through `voiceschanged`, through polling, or after
+ * the first tap, whichever the browser offers first.
+ */
+function initVoiceSelector() {
+  const selects = [el.voiceSelect, el.settingsVoiceSelect].filter(Boolean);
+  if (selects.length === 0) return;
+
+  const onVoiceChosen = (event) => {
+    const voice = voicesCache.find((candidate) => candidate.name === event.target.value);
+    if (!voice) return;
+    saveSettings({ voiceName: voice.name });
+    appliedVoiceName = voice.name;
+    setVoice(voice);
+    syncVoiceSelects();
+  };
+  selects.forEach((select) => select.addEventListener('change', onVoiceChosen));
+
+  let retries = 0;
+  let pollTimer = null;
+
+  const stopRetrying = () => {
+    if (pollTimer !== null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    document.removeEventListener('pointerdown', retryOnGesture, true);
+  };
+
+  async function retryOnGesture() {
+    // iOS releases the voice list to a page it has seen a gesture in. The
+    // list is read on the next tick, once the engine has had its moment.
+    if (await applyVoices(await getAvailableVoices())) stopRetrying();
+  }
+
+  const retry = async () => {
+    if (await applyVoices(await getAvailableVoices())) {
+      stopRetrying();
+    } else if (retries >= 30) {
+      stopRetrying();
+      markVoicesMissing();
+    }
+  };
+
+  // The list can also change later (a system voice pack installed while
+  // the app is open), so the event is kept for the whole session.
+  window.speechSynthesis?.addEventListener?.('voiceschanged', () => {
+    applyVoices(window.speechSynthesis.getVoices() || []);
   });
+
+  // A tap anywhere may unlock the list — the retry rides along.
+  document.addEventListener('pointerdown', retryOnGesture, true);
+
+  (async () => {
+    const found = applyVoices(await getAvailableVoices());
+    if (found) {
+      stopRetrying();
+    } else {
+      pollTimer = setInterval(retry, 1000);
+    }
+  })();
+
+  // The selector's width changes when the voices fill it in.
+  onSettingsChange(syncVoiceSelects);
 }
 
 /* ==========================================================================
@@ -389,5 +533,7 @@ export async function initControls() {
   initPlaybackWatchdog();
   initPrint();
 
-  await initVoiceSelector();
+  // Not awaited: on a phone the voice list can take seconds, and the rest
+  // of the header must not stand behind it. The selectors fill in later.
+  initVoiceSelector();
 }

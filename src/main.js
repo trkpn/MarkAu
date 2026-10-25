@@ -48,6 +48,7 @@ import { saveFile } from '@/app/editor/export-file.js';
 import { initPreview, forgetTabPosition } from '@/app/preview/preview.js';
 import { toggleNarration } from '@/app/preview/narration.js';
 import { initControls } from '@/app/shell/controls.js';
+import { initHeaderMoreMenu } from '@/app/shell/more-menu.js';
 import { initPaste } from '@/app/editor/paste.js';
 import { initUrlImport } from '@/app/import/url-import.js';
 import { initTranslate } from '@/app/translate/translate.js';
@@ -165,6 +166,7 @@ async function initApp() {
   initDocumentTitle();
   initMiniPlayer();
   initOutline();
+  initHeaderMoreMenu();
   initSettingsModal();
 
   // The voice selector changes the toolbar's content width

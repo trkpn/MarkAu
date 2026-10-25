@@ -267,6 +267,18 @@
             >
               <span class="btn-icon-slot" id="icon-theme" aria-hidden="true"></span>
             </button>
+            <!-- Overflow: on a narrow screen the controls the density system
+                 sheds stay reachable here instead of vanishing. -->
+            <button
+              id="btn-more"
+              class="btn btn-icon"
+              title="More actions"
+              aria-label="More actions"
+              aria-haspopup="true"
+              aria-expanded="false"
+            >
+              <span class="btn-icon-slot" id="icon-more" aria-hidden="true"></span>
+            </button>
             <button
               id="btn-settings"
               class="btn btn-icon"
@@ -276,6 +288,53 @@
               <span class="btn-icon-slot" id="icon-settings" aria-hidden="true"></span>
             </button>
           </div>
+        </div>
+
+        <!-- The overflow menu itself. It sits inside the header so the same
+             data-hide-* attributes decide which items it offers, but it is
+             fixed to the viewport so the header's scrolling row cannot clip
+             or move it. -->
+        <div id="header-more-menu" class="header-more-menu" hidden>
+          <div class="more-menu-section" id="more-voice-section" hidden>
+            <div class="more-menu-label">Voice</div>
+            <div id="more-voice-slot" class="more-voice-slot"></div>
+          </div>
+          <button class="more-item" data-target="btn-import-url">
+            <span class="btn-icon-slot" id="icon-more-import" aria-hidden="true"></span>
+            <span>Import from a URL</span>
+          </button>
+          <button class="more-item" data-target="btn-paste">
+            <span class="btn-icon-slot" id="icon-more-paste" aria-hidden="true"></span>
+            <span>Paste</span>
+          </button>
+          <button class="more-item" data-target="btn-translate">
+            <span class="btn-icon-slot" id="icon-more-translate" aria-hidden="true"></span>
+            <span>Translate</span>
+          </button>
+          <button class="more-item" data-target="btn-history">
+            <span class="btn-icon-slot" id="icon-more-history" aria-hidden="true"></span>
+            <span>Version history</span>
+          </button>
+          <button class="more-item" data-target="btn-new-tab">
+            <span class="btn-icon-slot" id="icon-more-new-tab" aria-hidden="true"></span>
+            <span>New tab</span>
+          </button>
+          <button class="more-item" data-target="btn-copy">
+            <span class="btn-icon-slot" id="icon-more-copy" aria-hidden="true"></span>
+            <span>Copy markdown</span>
+          </button>
+          <button class="more-item" data-target="btn-print">
+            <span class="btn-icon-slot" id="icon-more-print" aria-hidden="true"></span>
+            <span>Print / PDF</span>
+          </button>
+          <button class="more-item" data-target="btn-sample">
+            <span class="btn-icon-slot" id="icon-more-sample" aria-hidden="true"></span>
+            <span>Load sample</span>
+          </button>
+          <button class="more-item more-item-danger" data-target="btn-reset">
+            <span class="btn-icon-slot" id="icon-more-reset" aria-hidden="true"></span>
+            <span>Reset document</span>
+          </button>
         </div>
       </header>
 
@@ -745,6 +804,16 @@
               <!-- Narration Group -->
               <div class="settings-section">
                 <div class="settings-section-title">Narration</div>
+                <div class="setting-item">
+                  <label for="settings-voice-select">Voice</label>
+                  <select id="settings-voice-select" class="select-control modal-select">
+                    <option value="">Loading voices…</option>
+                  </select>
+                  <p class="hint-text">
+                    The voice the document is read with. On a phone the list can
+                    take a moment — it fills in by itself.
+                  </p>
+                </div>
                 <div class="setting-checkbox-item">
                   <label class="checkbox-label">
                     <input type="checkbox" id="check-auto-stop" checked />
