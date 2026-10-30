@@ -423,13 +423,16 @@ function calloutPlugin(md) {
 
       // Title tokens
       const titleOpen = new state.Token('callout_title_open', 'p', 1);
+      titleOpen.level = open.level + 1;
       titleOpen.attrJoin('class', 'callout-title');
       const titleText = new state.Token('text', '', 0);
       titleText.content = title;
       const titleInline = new state.Token('inline', '', 0);
+      titleInline.level = open.level + 2;
       titleInline.content = title;
       titleInline.children = [titleText];
       const titleClose = new state.Token('callout_title_close', 'p', -1);
+      titleClose.level = open.level + 1;
 
       const isParagraphEmpty =
         !inline.children ||
@@ -445,7 +448,7 @@ function calloutPlugin(md) {
         tokens.splice(index + 1, 0, titleOpen, titleInline, titleClose);
       }
 
-      index = closeIndex + 4;
+      index = tokens.indexOf(close) + 1;
     }
   });
 

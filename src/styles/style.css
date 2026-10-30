@@ -1550,6 +1550,40 @@
     animation: pulse-dot 0.8s infinite alternate;
   }
 
+  .app-version-badge {
+    font-family: var(--ma-font-code);
+    font-size: 0.72rem;
+    color: var(--ma-fg-muted);
+    opacity: 0.75;
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity 0.15s ease, color 0.15s ease;
+  }
+
+  .app-version-badge:hover {
+    opacity: 1;
+    color: var(--ma-accent);
+  }
+
+  .settings-build-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 1rem;
+    margin-top: 0.5rem;
+    border-top: 1px solid var(--ma-border);
+    font-size: 0.75rem;
+    color: var(--ma-fg-muted);
+  }
+
+  .settings-build-footer code {
+    font-family: var(--ma-font-code);
+    background: var(--ma-surface-2);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    border: 1px solid var(--ma-border);
+  }
+
   @keyframes pulse-dot {
     from {
       opacity: 0.4;

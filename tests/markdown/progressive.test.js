@@ -83,4 +83,32 @@ describe('progressive rendering', () => {
     expect(html).toContain('data-line="5"');
     expect(html).toContain('data-line-end="5"');
   });
+
+  it('renders callouts in balanced groups', () => {
+    const markdown = '> [!NOTE]\n> Lorem ipsum';
+    const progressive = renderInGroups(markdown);
+    expect(progressive.html).toContain('callout callout-note');
+    expect(progressive.html).toContain('callout-title');
+    expect(progressive.html).toContain('Lorem ipsum');
+    expect(progressive.groups).toHaveLength(1);
+  });
+
+  it('renders callout followed by blank line and content in balanced groups', () => {
+    const markdown = '> [!WARNING]\n>\n> Cautionary message\n\nNext paragraph outside';
+    const progressive = renderInGroups(markdown);
+    expect(progressive.html).toContain('callout callout-warning');
+    expect(progressive.html).toContain('Cautionary message');
+    expect(progressive.html).toContain('Next paragraph outside');
+    expect(progressive.groups).toHaveLength(2);
+  });
+
+  it('renders consecutive callouts cleanly', () => {
+    const markdown = '> [!NOTE]\n> Note text\n\n> [!TIP]\n> Tip text';
+    const progressive = renderInGroups(markdown);
+    expect(progressive.html).toContain('callout-note');
+    expect(progressive.html).toContain('Note text');
+    expect(progressive.html).toContain('callout-tip');
+    expect(progressive.html).toContain('Tip text');
+    expect(progressive.groups).toHaveLength(2);
+  });
 });

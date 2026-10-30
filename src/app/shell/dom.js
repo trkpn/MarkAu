@@ -77,6 +77,8 @@ export const el = {
   modalCard: document.querySelector('#modal-settings .modal-card'),
   modalBody: document.querySelector('#modal-settings .modal-body'),
   btnCloseSettings: document.getElementById('btn-close-settings'),
+  settingsBuildApp: document.getElementById('settings-build-app'),
+  settingsBuildDate: document.getElementById('settings-build-date'),
   selectFontUi: document.getElementById('select-font-ui'),
   selectFontReading: document.getElementById('select-font-reading'),
   selectFontEditor: document.getElementById('select-font-editor'),
@@ -155,7 +157,8 @@ export const el = {
   docStats: document.getElementById('doc-stats'),
   readingTime: document.getElementById('reading-time'),
   activeTokenInfo: document.getElementById('active-token-info'),
-  speechStatusChip: document.getElementById('speech-status-chip')
+  speechStatusChip: document.getElementById('speech-status-chip'),
+  appVersionBadge: document.getElementById('app-version-badge')
 };
 
 const ICON_MAPPINGS = {

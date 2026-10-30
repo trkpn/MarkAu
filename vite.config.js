@@ -2,9 +2,50 @@ import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { handleProxyRequest } from './server/proxy-core.js';
 import { handleTranscriptRequest } from './server/youtube-transcript.js';
 import { handleTranslateRequest } from './server/translate-core.js';
+
+const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'));
+
+function getGitCommit() {
+  if (process.env.CF_PAGES_COMMIT_SHA) {
+    return process.env.CF_PAGES_COMMIT_SHA.slice(0, 7);
+  }
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim();
+  } catch {
+    return 'dev';
+  }
+}
+
+/**
+ * Generates and synchronizes src/core/build-info.js with package version,
+ * git commit hash, and build timestamp.
+ */
+function buildInfoPlugin() {
+  return {
+    name: 'build-info-plugin',
+    configResolved() {
+      const commit = getGitCommit();
+      const buildInfoPath = path.resolve(__dirname, 'src/core/build-info.js');
+      const content = `/**
+ * Application build and version information.
+ * Generated automatically at build/dev time.
+ */
+export const BUILD_INFO = {
+  version: ${JSON.stringify(pkg.version)},
+  commit: ${JSON.stringify(commit)},
+  buildTime: ${JSON.stringify(new Date().toISOString())}
+};
+`;
+      if (!fs.existsSync(buildInfoPath) || fs.readFileSync(buildInfoPath, 'utf8') !== content) {
+        fs.writeFileSync(buildInfoPath, content, 'utf8');
+      }
+    }
+  };
+}
 
 /**
  * Custom Vite Plugin to automatically inject all compiled assets (JS, CSS, fonts, HTML)
@@ -122,6 +163,27 @@ function devProxyPlugin() {
         const host = req.headers.host || 'localhost';
         const url = new URL(req.url || '/', `http://${host}`);
 
+        if (url.pathname === '/api/version') {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Cache-Control', 'no-store, max-age=0');
+          res.end(
+            JSON.stringify(
+              {
+                app: 'MarkAu',
+                version: pkg.version,
+                commit: getGitCommit(),
+                cfCommit: null,
+                cfBranch: null,
+                buildTime: new Date().toISOString()
+              },
+              null,
+              2
+            )
+          );
+          return;
+        }
+
         const endpoints = {
           '/api/fetch': handleProxyRequest,
           '/api/youtube-transcript': handleTranscriptRequest,
@@ -178,7 +240,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src')
     }
   },
-  plugins: [tailwindcss(), swPrecachePlugin(), devProxyPlugin()],
+  plugins: [tailwindcss(), buildInfoPlugin(), swPrecachePlugin(), devProxyPlugin()],
   server: {
     port: 5173,
     open: false

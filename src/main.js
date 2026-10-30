@@ -64,6 +64,7 @@ import { initSettingsModal } from '@/app/settings/modal.js';
 import { confirmDialog } from '@/app/shell/dialog.js';
 import { defaultMarkdown } from '@/content/sample.js';
 import { isAnotherTabOpen } from '@/core/multi-tab.js';
+import { BUILD_INFO } from '@/core/build-info.js';
 
 /* ==========================================================================
  * Document level actions
@@ -175,6 +176,25 @@ async function initApp() {
   // The outline follows the document
   onContentChange(() => rebuildOutline());
   rebuildOutline();
+
+  // Expose build and version hints
+  window.__MARKAU_VERSION__ = BUILD_INFO;
+  console.info(`MarkAu v${BUILD_INFO.version} (${BUILD_INFO.commit})`);
+
+  if (el.appVersionBadge) {
+    el.appVersionBadge.textContent = `v${BUILD_INFO.version} (${BUILD_INFO.commit})`;
+    el.appVersionBadge.title = `MarkAu v${BUILD_INFO.version} · commit: ${BUILD_INFO.commit} · built: ${BUILD_INFO.buildTime.slice(0, 10)}`;
+    el.appVersionBadge.addEventListener('click', () => {
+      el.btnSettings?.click();
+    });
+  }
+
+  if (el.settingsBuildApp) {
+    el.settingsBuildApp.innerHTML = `MarkAu v${BUILD_INFO.version} · commit <code>${BUILD_INFO.commit}</code>`;
+  }
+  if (el.settingsBuildDate) {
+    el.settingsBuildDate.textContent = `Built ${BUILD_INFO.buildTime.slice(0, 10)}`;
+  }
 }
 
 initApp();
