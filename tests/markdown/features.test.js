@@ -70,6 +70,48 @@ describe('callouts', () => {
 
     expect(html).not.toContain('<br>');
   });
+
+  it('supports multi-paragraph callouts', () => {
+    const html = renderMarkdown('> [!CAUTION]\n> First line.\n>\n> Second line.');
+
+    expect(html).toContain('callout callout-caution');
+    expect(html).toContain('callout-title');
+    expect(html).toContain('First line.');
+    expect(html).toContain('Second line.');
+    expect(html).not.toContain('[!CAUTION]');
+  });
+
+  it('handles a blank line directly following the callout marker', () => {
+    const html = renderMarkdown('> [!CAUTION]\n>\n> **Caution**: High risk.');
+
+    expect(html).toContain('callout callout-caution');
+    expect(html).toContain('High risk.');
+    expect(html).not.toContain('[!CAUTION]');
+  });
+
+  it('supports bold prefix syntax like > **Caution**: ...', () => {
+    const html = renderMarkdown('> **Caution**: High risk actions that could cause data loss');
+
+    expect(html).toContain('callout callout-caution');
+    expect(html).toContain('High risk actions');
+    expect(html).toContain('callout-title');
+  });
+
+  it('supports custom alert title in [!NOTE] Custom Title', () => {
+    const html = renderMarkdown('> [!NOTE] Custom Alert Title\n> Body text here.');
+
+    expect(html).toContain('callout callout-note');
+    expect(html).toContain('Custom Alert Title');
+    expect(html).toContain('Body text here.');
+  });
+
+  it('supports lists inside callouts', () => {
+    const html = renderMarkdown('> [!TIP]\n> - Step 1\n> - Step 2');
+
+    expect(html).toContain('callout callout-tip');
+    expect(html).toContain('<li>Step 1</li>');
+    expect(html).toContain('<li>Step 2</li>');
+  });
 });
 
 describe('emoji', () => {

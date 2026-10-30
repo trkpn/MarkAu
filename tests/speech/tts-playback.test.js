@@ -444,6 +444,40 @@ describe('narration that the browser drops', () => {
 
     expect(fakeSpeech.spoken[0].lang).toBe('th-TH');
   });
+
+  it('never auto-resumes speech when paused even if speech engine is idle', async () => {
+    loadDocument(SENTENCES.join(' '));
+    await startReading();
+    fakeSpeech.spoken[0].onstart();
+
+    // User pauses
+    tts.pause();
+    expect(tts.isSpeechPaused()).toBe(true);
+
+    const spokenCount = fakeSpeech.spoken.length;
+    fakeSpeech.paused = false;
+    fakeSpeech.speaking = false;
+    fakeSpeech.pending = false;
+
+    // Watchdog runs
+    tts.reconcileWithSpeechApi();
+
+    // Must still remain paused, never auto-speak
+    expect(tts.isSpeechPaused()).toBe(true);
+    expect(fakeSpeech.spoken.length).toBe(spokenCount);
+  });
+
+  it('pauses gracefully when interrupted by external speech', async () => {
+    loadDocument(SENTENCES.join(' '));
+    await startReading();
+    const utterance = fakeSpeech.spoken[0];
+    utterance.onstart();
+
+    // Edge Read Aloud or external tool interrupts our utterance
+    utterance.onerror({ error: 'interrupted' });
+
+    expect(tts.isSpeechPaused()).toBe(true);
+  });
 });
 
 describe('windowed tokenization', () => {

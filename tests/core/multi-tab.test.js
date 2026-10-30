@@ -216,8 +216,8 @@ describe('narration across tabs', () => {
     if (typeof BroadcastChannel === 'function') {
       const otherTab = new BroadcastChannel('markau-narration');
       otherTab.postMessage({ type: 'narration-start' });
+      await new Promise((resolve) => setTimeout(resolve, 20));
       otherTab.close();
-      await new Promise((resolve) => setTimeout(resolve, 0));
     } else {
       expect(localStorage.getItem('markau_narration_ping')).not.toBeNull();
       window.dispatchEvent(

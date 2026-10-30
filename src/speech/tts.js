@@ -1447,7 +1447,15 @@ function speakChunk(chunk, index, sessionId) {
 
     // Our own `cancel()` — a new session, or a chunk handed over again — is
     // not an error.
-    if (event.error === 'canceled' || event.error === 'interrupted') return;
+    if (event.error === 'canceled') return;
+
+    if (event.error === 'interrupted') {
+      // The browser's speech synthesis engine was taken over or interrupted
+      // by another feature or tab (e.g. Edge browser's native Read Aloud).
+      // Pause MarkAu gracefully instead of retrying and conflicting with it.
+      pause();
+      return;
+    }
 
     console.warn('SpeechSynthesisUtterance error:', event.error || 'unknown');
     retryFromChunk(index, sessionId);
@@ -1860,20 +1868,8 @@ export function reconcileWithSpeechApi() {
   const api = window.speechSynthesis;
 
   if (isPaused) {
-    if (!api.paused && !api.speaking && !api.pending) {
-      // The paused utterance vanished — try to continue from the same word.
-      isPaused = false;
-      if (currentWordIndex >= 0) {
-        speakFromWord(currentWordIndex);
-      } else {
-        notifyState({
-          isPlaying: false,
-          isPaused: false,
-          currentWordIndex: -1,
-          reason: 'speech-lost'
-        });
-      }
-    }
+    // When paused, NEVER auto-resume playback. Only explicit user gestures
+    // (Play button or Space key) should resume speech.
     return;
   }
 
@@ -1882,7 +1878,7 @@ export function reconcileWithSpeechApi() {
   // The engine can be paused behind our back (a tab switch, an audio device
   // change): a session that looks like it is playing would otherwise stay
   // silent until the user presses Play again.
-  if (api.paused && !isPaused) {
+  if (api.paused && !isPaused && !document.hidden) {
     api.resume();
     lastEventAt = Date.now();
   }
@@ -1890,6 +1886,14 @@ export function reconcileWithSpeechApi() {
   // The engine reports activity — the reading is alive, whatever the
   // boundary events are doing. Some voices never fire them at all.
   if (api.speaking || api.pending) {
+    // If the browser reports activity but we have no active utterances of our own,
+    // that speech belongs to Edge browser's native Read Aloud or another tab.
+    // Pause MarkAu so we do not interrupt or conflict with the other speech.
+    if (liveUtterances.size === 0) {
+      pause();
+      return;
+    }
+
     // A chunk never lasts longer than the stall threshold, so an engine that
     // holds the queue without a single event is stuck, not slow. This also
     // covers a queued request that never starts.
@@ -1905,6 +1909,12 @@ export function reconcileWithSpeechApi() {
 
     restartAttempts += 1;
     speakFromWord(Math.max(0, currentWordIndex));
+    return;
+  }
+
+  // If another speech engine or tab is active while our queue is empty, do not wake MarkAu.
+  if (api.speaking && liveUtterances.size === 0) {
+    pause();
     return;
   }
 

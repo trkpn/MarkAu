@@ -336,7 +336,7 @@ function renderNow(reason, { force = false } = {}) {
     el.editor.scrollTop = 0;
     el.lineNumbers.scrollTop = 0;
   } else if (positionRestored) {
-    restoreSourceLine = getPreviewTopLine();
+    restoreSourceLine = getEditorTopLine();
   }
 
   cancelRender();
@@ -366,6 +366,7 @@ function renderNow(reason, { force = false } = {}) {
   renderSequence = job.id;
   currentRender = job;
 
+  suppressScroll.preview = true;
   el.preview.replaceChildren();
   anchors = [];
   anchorsDirty = true;
@@ -969,8 +970,11 @@ function tryRestoreSourceLine() {
  * scroll of the pane under the reader's hand stays smooth.
  */
 function initSyncScroll() {
+  let lastUserPane = null;
+
   // A real gesture always wins over a pending programmatic scroll.
   const releaseSuppression = (key) => () => {
+    lastUserPane = key;
     suppressScroll[key] = false;
   };
 
@@ -985,6 +989,16 @@ function initSyncScroll() {
 
     if (key === 'editor') {
       el.lineNumbers.scrollTop = el.editor.scrollTop;
+    }
+
+    if (key === 'preview') {
+      // NEVER allow the preview to scroll the editor while:
+      // 1) The user is typing/editing in the editor (editor has focus)
+      // 2) The preview is rendering/rebuilding its DOM (currentRender is active)
+      // 3) The last user interaction was in the editor
+      if (document.activeElement === el.editor || currentRender || lastUserPane === 'editor') {
+        return;
+      }
     }
 
     const mode = getSettings().syncMode;
@@ -1047,6 +1061,11 @@ function initSyncScroll() {
 
   el.editor.addEventListener('scroll', () => onScroll('editor'), { passive: true });
   el.previewWrapper.addEventListener('scroll', () => onScroll('preview'), { passive: true });
+
+  el.editor.addEventListener('input', () => {
+    lastUserPane = 'editor';
+    suppressScroll.preview = true;
+  }, { passive: true });
 
   ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach((type) => {
     el.editor.addEventListener(type, releaseSuppression('editor'), { passive: true });

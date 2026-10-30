@@ -185,11 +185,83 @@ const CALLOUT_KINDS = {
   caution: 'Caution'
 };
 
+const CALLOUT_ALIASES = {
+  note: 'note',
+  info: 'note',
+  tip: 'tip',
+  hint: 'tip',
+  important: 'important',
+  warning: 'warning',
+  warn: 'warning',
+  caution: 'caution',
+  danger: 'caution',
+  attention: 'warning',
+  หมายเหตุ: 'note',
+  ข้อความ: 'note',
+  คำแนะนำ: 'tip',
+  ข้อแนะนำ: 'tip',
+  เคล็ดลับ: 'tip',
+  สำคัญ: 'important',
+  คำเตือน: 'warning',
+  เตือน: 'warning',
+  ข้อควรระวัง: 'caution',
+  ระวัง: 'caution',
+  อันตราย: 'caution'
+};
+
 /**
- * GitHub-style callouts.
+ * Trims leading softbreaks and whitespace from an inline token's children.
+ */
+function trimLeadingInline(inline) {
+  while (inline.children && inline.children.length > 0) {
+    const child = inline.children[0];
+    if (child.type === 'softbreak' || child.type === 'hardbreak') {
+      inline.children.shift();
+    } else if (child.type === 'text' && !child.content.trim()) {
+      inline.children.shift();
+    } else if (child.type === 'text') {
+      child.content = child.content.replace(/^[ \t]+/, '');
+      if (!child.content) inline.children.shift();
+      break;
+    } else {
+      break;
+    }
+  }
+}
+
+/**
+ * Strips prefix characters from an inline token's children.
+ */
+function stripInlinePrefix(inline, length) {
+  let toRemove = length;
+  while (toRemove > 0 && inline.children && inline.children.length > 0) {
+    const child = inline.children[0];
+    if (child.type === 'text') {
+      if (child.content.length <= toRemove) {
+        toRemove -= child.content.length;
+        inline.children.shift();
+      } else {
+        child.content = child.content.slice(toRemove);
+        toRemove = 0;
+      }
+    } else if (child.type === 'softbreak' || child.type === 'hardbreak') {
+      toRemove -= 1;
+      inline.children.shift();
+    } else {
+      break;
+    }
+  }
+  trimLeadingInline(inline);
+}
+
+/**
+ * GitHub-style and bold-title callouts.
  *
- * A blockquote that starts with `[!NOTE]` (or any other kind) becomes a
- * coloured panel with a title, the way GitHub and Obsidian render them.
+ * Supports:
+ * - `> [!NOTE]` (and tip, important, warning, caution)
+ * - `> [!CAUTION] Custom Title`
+ * - Multi-paragraph and complex content inside callouts
+ * - `> **Warning**: ...` or `> **Caution**: ...` as callouts
  */
 function calloutPlugin(md) {
   md.core.ruler.after('inline', 'callouts', (state) => {
@@ -204,74 +276,184 @@ function calloutPlugin(md) {
         continue;
       }
 
-      const paragraphOpen = tokens[index + 1];
-      const inline = tokens[index + 2];
-      const paragraphClose = tokens[index + 3];
-      const close = tokens[index + 4];
+      // Find matching blockquote_close
+      let closeIndex = index + 1;
+      let depth = 1;
+      while (closeIndex < tokens.length && depth > 0) {
+        if (tokens[closeIndex].type === 'blockquote_open') depth++;
+        else if (tokens[closeIndex].type === 'blockquote_close') depth--;
+        if (depth === 0) break;
+        closeIndex++;
+      }
 
-      const isSimpleBlockquote =
-        paragraphOpen?.type === 'paragraph_open' &&
-        inline?.type === 'inline' &&
-        paragraphClose?.type === 'paragraph_close' &&
-        close?.type === 'blockquote_close';
-
-      if (!isSimpleBlockquote) {
+      if (depth !== 0) {
         index++;
         continue;
       }
 
-      // The marker sits on its own line — the line break after it is part of
-      // the marker, not of the text.
-      const match = inline.content.match(/^\[!(\w+)\][ \t]*\r?\n?/);
-      const kind = match?.[1]?.toLowerCase();
+      // Find the first paragraph_open and inline token
+      let pOpenIdx = -1;
+      let inlineIdx = -1;
+      let pCloseIdx = -1;
 
-      if (!kind || !CALLOUT_KINDS[kind]) {
-        index++;
+      for (let i = index + 1; i < closeIndex; i++) {
+        if (tokens[i].type === 'paragraph_open') {
+          pOpenIdx = i;
+          if (tokens[i + 1]?.type === 'inline') {
+            inlineIdx = i + 1;
+            if (tokens[i + 2]?.type === 'paragraph_close') {
+              pCloseIdx = i + 2;
+            }
+          }
+          break;
+        }
+      }
+
+      if (inlineIdx === -1) {
+        index = closeIndex + 1;
         continue;
       }
 
-      // The marker is the beginning of the first text run — take it off.
-      const first = inline.children?.[0];
-      if (first?.type === 'text') {
-        first.content = first.content.slice(match[0].length);
-        if (!first.content) inline.children.shift();
+      const inline = tokens[inlineIdx];
+      let kind = null;
+      let title = null;
+      let matched = false;
+
+      // Case 1: GitHub / Obsidian alert syntax: [!KIND] Optional Custom Title
+      const alertMatch = inline.content.match(/^\[!([a-zA-Z]+)\][ \t]*([^\r\n]*)[ \t]*(?:\r?\n)?/);
+      if (alertMatch) {
+        const rawKind = alertMatch[1].toLowerCase();
+        const resolvedKind = CALLOUT_ALIASES[rawKind] || (CALLOUT_KINDS[rawKind] ? rawKind : null);
+        if (resolvedKind) {
+          kind = resolvedKind;
+          const customTitle = alertMatch[2]?.trim();
+          title = customTitle || CALLOUT_KINDS[resolvedKind];
+          matched = true;
+          stripInlinePrefix(inline, alertMatch[0].length);
+        }
       }
 
-      // The line break that followed the marker belongs to the marker.
-      while (
-        inline.children?.[0] &&
-        (inline.children[0].type === 'softbreak' ||
-          (inline.children[0].type === 'text' && !inline.children[0].content))
-      ) {
-        inline.children.shift();
+      // Case 2: Bold prefix syntax: **Kind**: or **Title**:
+      // e.g. > **Caution**: ... or > **Note**: ...
+      if (!matched && inline.children) {
+        trimLeadingInline(inline);
+        if (inline.children.length >= 3) {
+          if (
+            inline.children[0].type === 'strong_open' &&
+            inline.children[1].type === 'text' &&
+            inline.children[2].type === 'strong_close'
+          ) {
+            const rawBold = inline.children[1].content.trim();
+            let colonFound = false;
+            let cleanBold = rawBold;
+            let colonSliceLen = 0;
+
+            if (rawBold.endsWith(':')) {
+              colonFound = true;
+              cleanBold = rawBold.slice(0, -1).trim();
+            } else if (inline.children[3]?.type === 'text') {
+              const nextMatch = inline.children[3].content.match(/^:[ \t]*/);
+              if (nextMatch) {
+                colonFound = true;
+                colonSliceLen = nextMatch[0].length;
+              }
+            }
+
+            if (colonFound && cleanBold) {
+              const lower = cleanBold.toLowerCase();
+              const resolvedKind = CALLOUT_ALIASES[lower] || CALLOUT_ALIASES[cleanBold] || (CALLOUT_KINDS[lower] ? lower : null);
+              if (resolvedKind) {
+                kind = resolvedKind;
+                title = CALLOUT_KINDS[resolvedKind] || cleanBold;
+              } else {
+                kind = 'note';
+                title = cleanBold;
+              }
+              matched = true;
+
+              inline.children.splice(0, 3);
+              if (colonSliceLen > 0 && inline.children[0]?.type === 'text') {
+                inline.children[0].content = inline.children[0].content.slice(colonSliceLen);
+                if (!inline.children[0].content) inline.children.shift();
+              }
+              trimLeadingInline(inline);
+            }
+          }
+        }
       }
 
+      if (!matched || !kind) {
+        index = closeIndex + 1;
+        continue;
+      }
+
+      // Clean up redundant bold label matching title
+      // e.g. > [!CAUTION]\n> **Caution**: text
+      if (inline.children) {
+        trimLeadingInline(inline);
+        if (inline.children.length >= 3) {
+          if (
+            inline.children[0].type === 'strong_open' &&
+            inline.children[1].type === 'text' &&
+            inline.children[2].type === 'strong_close'
+          ) {
+            const bold = inline.children[1].content.trim().replace(/:$/, '').trim();
+            if (bold.toLowerCase() === kind || bold.toLowerCase() === title.toLowerCase()) {
+              inline.children.splice(0, 3);
+              if (inline.children[0]?.type === 'text') {
+                const colonMatch = inline.children[0].content.match(/^:[ \t]*/);
+                if (colonMatch) {
+                  inline.children[0].content = inline.children[0].content.slice(colonMatch[0].length);
+                }
+                if (!inline.children[0].content) inline.children.shift();
+              }
+              trimLeadingInline(inline);
+            }
+          }
+        }
+      }
+
+      // Convert open and close tokens
+      const close = tokens[closeIndex];
       open.type = 'callout_open';
       open.tag = 'div';
       open.attrJoin('class', `callout callout-${kind}`);
       close.type = 'callout_close';
       close.tag = 'div';
 
-      // The title of the callout.
+      // Title tokens
       const titleOpen = new state.Token('callout_title_open', 'p', 1);
       titleOpen.attrJoin('class', 'callout-title');
       const titleText = new state.Token('text', '', 0);
-      titleText.content = CALLOUT_KINDS[kind];
+      titleText.content = title;
       const titleInline = new state.Token('inline', '', 0);
-      titleInline.content = CALLOUT_KINDS[kind];
+      titleInline.content = title;
       titleInline.children = [titleText];
       const titleClose = new state.Token('callout_title_close', 'p', -1);
 
-      tokens.splice(index + 1, 0, titleOpen, titleInline, titleClose);
-      index += 6;
+      const isParagraphEmpty =
+        !inline.children ||
+        inline.children.length === 0 ||
+        (inline.children.length === 1 &&
+          inline.children[0].type === 'text' &&
+          !inline.children[0].content.trim());
+
+      if (isParagraphEmpty && pCloseIdx !== -1) {
+        // Replace empty first paragraph with the title
+        tokens.splice(pOpenIdx, 3, titleOpen, titleInline, titleClose);
+      } else {
+        tokens.splice(index + 1, 0, titleOpen, titleInline, titleClose);
+      }
+
+      index = closeIndex + 4;
     }
   });
 
-  md.renderer.rules.callout_open = (tokens, idx) =>
-    `<div class="${tokens[idx].attrGet('class') || 'callout'}">\n`;
+  md.renderer.rules.callout_open = (tokens, idx, options, env, self) =>
+    `<div class="${tokens[idx].attrGet('class') || 'callout'}"${self.renderAttrs(tokens[idx])}>\n`;
   md.renderer.rules.callout_close = () => `</div>\n`;
-  md.renderer.rules.callout_title_open = (tokens, idx) =>
-    `<p class="${tokens[idx].attrGet('class') || 'callout-title'}">`;
+  md.renderer.rules.callout_title_open = (tokens, idx, options, env, self) =>
+    `<p class="${tokens[idx].attrGet('class') || 'callout-title'}"${self.renderAttrs(tokens[idx])}>`;
   md.renderer.rules.callout_title_close = () => `</p>\n`;
 }
 

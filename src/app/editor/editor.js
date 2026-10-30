@@ -604,6 +604,7 @@ export function insertText(text, { replaceDocument = false } = {}) {
 function insertFormatting(prefix, suffix = '', defaultText = '') {
   const start = el.editor.selectionStart;
   const end = el.editor.selectionEnd;
+  const scrollTop = el.editor.scrollTop;
   const selected = el.editor.value.substring(start, end) || defaultText;
   const replacement = `${prefix}${selected}${suffix}`;
   const newCursor = start + prefix.length + selected.length;
@@ -624,6 +625,8 @@ function insertFormatting(prefix, suffix = '', defaultText = '') {
   }
 
   el.editor.setSelectionRange(newCursor, newCursor);
+  el.editor.scrollTop = scrollTop;
+  if (el.lineNumbers) el.lineNumbers.scrollTop = scrollTop;
 }
 
 const FORMAT_ACTIONS = {
