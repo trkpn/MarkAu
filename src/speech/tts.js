@@ -1670,6 +1670,24 @@ function finishPlayback() {
  * Starts reading from a specific word index.
  * @param {number} wordIndex
  */
+/**
+ * Safely cancels the speech synthesis engine.
+ * In Chromium, calling cancel() while paused does NOT purge the queued
+ * audio buffer from the hardware driver; unpausing before cancel ensures
+ * stale audio from previous sessions/tabs is completely flushed.
+ */
+function safeCancelSpeech() {
+  if (!('speechSynthesis' in window)) return;
+  try {
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+    window.speechSynthesis.cancel();
+  } catch {
+    /* ignore */
+  }
+}
+
 function speakFromWord(wordIndex = 0) {
   if (!('speechSynthesis' in window)) {
     console.error('Web Speech API is not supported in this browser.');
@@ -1698,6 +1716,9 @@ function speakFromWord(wordIndex = 0) {
   currentSessionId++;
   const thisSession = currentSessionId;
 
+  isStarting = true;
+  notifyState({ starting: true });
+
   cleanupUtterance();
   clearChunkTimer();
   clearPumpTimer();
@@ -1707,8 +1728,8 @@ function speakFromWord(wordIndex = 0) {
   // The cross-tab hand-shake is optional.
   if (getSettings().pauseOtherTabs) announceNarrationStart();
 
-  if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
-    window.speechSynthesis.cancel();
+  if (window.speechSynthesis.speaking || window.speechSynthesis.pending || window.speechSynthesis.paused) {
+    safeCancelSpeech();
   }
 
   if (speakDebounceTimer) {
@@ -1838,6 +1859,17 @@ function pauseForOtherTab() {
   // read does not pause this one.
   if (getSettings().pauseOtherTabs !== true) return;
   if (!isPlaying || isPaused) return;
+
+  // Another tab has taken over narration. Clean up our active utterances and
+  // timers so this tab does not fight over the browser's audio queue or re-pump chunks.
+  cleanupUtterance();
+  clearChunkTimer();
+  clearPumpTimer();
+  clearStartWatchdog();
+  chunkQueue = [];
+  chunkCursor = 0;
+  chunkDone = 0;
+
   window.speechSynthesis.pause();
   isPaused = true;
   notifyState({ isPlaying: true, isPaused: true, reason: 'other-tab' });
@@ -1864,7 +1896,7 @@ export function stop(reason = 'user') {
   chunkRetries = 0;
   cleanupUtterance();
   clearStartWatchdog();
-  window.speechSynthesis.cancel();
+  safeCancelSpeech();
   setActiveWord(-1);
   isPlaying = false;
   isPaused = false;
@@ -1921,7 +1953,7 @@ function cleanupUtterance() {
  */
 function cancelEngine() {
   for (const utterance of liveUtterances) utterance.__canceled = true;
-  window.speechSynthesis.cancel();
+  safeCancelSpeech();
 }
 
 /* ==========================================================================
@@ -2139,19 +2171,21 @@ export function handlePreviewClick(event) {
   const target = event.target;
   if (!target?.closest) return;
 
-  let wordEl = target.closest('.tts-word');
+  const parentBlock = target.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, tr');
 
-  if (!wordEl) {
-    const parentBlock = target.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, tr');
+  // If tokens are stale, or the document changed, or the block is not tokenized yet:
+  // we MUST rebuild the token window around this block first!
+  if (tokensAreStale || tokens.length === 0 || !parentBlock || !parentBlock.querySelector('.tts-word')) {
+    if (parentBlock && !ensureTokenWindowAt(parentBlock)) return;
+  }
 
-    // The block has not been tokenized yet. Tokenize only this window, not
-    // the whole document; a click in chapter forty must not pay for chapters
-    // one to thirty-nine.
-    if (tokensAreStale || tokens.length === 0 || !parentBlock?.querySelector('.tts-word')) {
-      if (!ensureTokenWindowAt(parentBlock || target)) return;
-    }
-
-    wordEl = parentBlock?.querySelector('.tts-word');
+  // Find the exact word under the cursor
+  let wordEl = target.closest?.('.tts-word');
+  if (!wordEl && typeof document.elementFromPoint === 'function' && event.clientX && event.clientY) {
+    wordEl = document.elementFromPoint(event.clientX, event.clientY)?.closest('.tts-word');
+  }
+  if (!wordEl && parentBlock) {
+    wordEl = parentBlock.querySelector('.tts-word');
   }
 
   if (!wordEl) return;

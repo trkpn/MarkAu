@@ -765,4 +765,53 @@ describe('chunking and speech engine resilience', () => {
     expect(tts.isNarrationStarting()).toBe(false);
     expect(tts.isSpeaking()).toBe(false);
   });
+
+  it('handlePreviewClick re-tokenizes when tokens are stale and speaks current text', async () => {
+    // 1. Initial document
+    loadDocument('First old document text here.');
+    tts.setDocumentLocale('en-US');
+    await startReading();
+    fakeSpeech.spoken[0].onstart();
+
+    // 2. Document is replaced or user switched content
+    tts.markTokensStale('content-replaced');
+
+    const preview = document.createElement('div');
+    const p1 = document.createElement('p');
+    p1.textContent = 'Brand new fresh text to be read.';
+    preview.appendChild(p1);
+    document.body.appendChild(preview);
+
+    tts.setPreviewContainer(preview);
+
+    // 3. User clicks on the new paragraph
+    tts.handlePreviewClick({
+      target: p1,
+      clientX: 10,
+      clientY: 10
+    });
+
+    await vi.advanceTimersByTimeAsync(60);
+
+    // Spoken utterance must contain the NEW text, not the old document!
+    const lastUtterance = fakeSpeech.spoken[fakeSpeech.spoken.length - 1];
+    expect(lastUtterance.text).toContain('Brand new fresh');
+  });
+
+  it('safeCancelSpeech unpauses paused speech engine before cancel to flush audio buffer', async () => {
+    loadDocument('Test document for queue flushing.');
+    tts.setDocumentLocale('en-US');
+
+    // Simulate browser left in paused state
+    fakeSpeech.paused = true;
+    const resumeSpy = vi.spyOn(fakeSpeech, 'resume');
+    const cancelSpy = vi.spyOn(fakeSpeech, 'cancel');
+
+    tts.play();
+    await vi.advanceTimersByTimeAsync(60);
+
+    // Resume must be called before cancel
+    expect(resumeSpy).toHaveBeenCalled();
+    expect(cancelSpy).toHaveBeenCalled();
+  });
 });

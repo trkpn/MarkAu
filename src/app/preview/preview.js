@@ -1458,6 +1458,9 @@ export function initPreview(handlers = {}) {
         applyFollowSetting();
         clearMessage();
       }
+      if (!isPreviewCurrent()) {
+        flushRender();
+      }
       setMessage('🔊 Starting from here...', { tone: 'accent', ttl: 1500 });
       handlePreviewClick(event);
       return;
