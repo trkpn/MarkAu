@@ -338,10 +338,80 @@ const CHARS_PER_SECOND_BY_LANGUAGE = {
 /** Where a group of sentences is closed: near the ceiling, to cut rarely. */
 const CHUNK_TARGET_RATIO = 0.85;
 
+/** Cached segmenters by locale to avoid GC churn during chunking */
+const cachedWordSegmenters = new Map();
+
+function getCachedWordSegmenter(locale) {
+  const loc = locale || 'en-US';
+  let segmenter = cachedWordSegmenters.get(loc);
+  if (!segmenter) {
+    try {
+      segmenter = new Intl.Segmenter(loc, { granularity: 'word' });
+    } catch {
+      segmenter = new Intl.Segmenter('en', { granularity: 'word' });
+    }
+    cachedWordSegmenters.set(loc, segmenter);
+  }
+  return segmenter;
+}
+
+/**
+ * Finds a natural break point for speech chunks, preventing word severance
+ * and broken Unicode combining mark sequences (critical for Thai and CJK).
+ *
+ * @param {string} text
+ * @param {number} cursor
+ * @param {number} limit
+ * @param {number} minCut
+ * @param {string} locale
+ * @returns {number}
+ */
+function findCleanCut(text, cursor, limit, minCut, locale) {
+  // 1. Prefer whitespace if available within the acceptable target range
+  const space = text.lastIndexOf(' ', limit);
+  if (space >= minCut) return space + 1;
+
+  // 2. Prefer clause/punctuation boundaries (newlines, commas, semicolons, Thai marks)
+  const slice = text.slice(cursor, limit);
+  const puncRegex = /[\n,;:!?\u0E2F\u0E46]/g;
+  let lastPunc = -1;
+  let match;
+  while ((match = puncRegex.exec(slice)) !== null) {
+    const idx = cursor + match.index + 1;
+    if (idx >= minCut && idx <= limit) {
+      lastPunc = idx;
+    }
+  }
+  if (lastPunc !== -1) return lastPunc;
+
+  // 3. For languages without spaces (Thai, Lao, Khmer, CJK), locate clean word boundaries
+  try {
+    const segmenter = getCachedWordSegmenter(locale);
+    let bestWordCut = -1;
+    for (const segment of segmenter.segment(text.slice(cursor, Math.min(text.length, limit + 30)))) {
+      const boundary = cursor + segment.index;
+      if (boundary > limit) break;
+      if (boundary >= minCut) {
+        bestWordCut = boundary;
+      }
+    }
+    if (bestWordCut >= minCut) return bestWordCut;
+  } catch {
+    // Fall back to character boundary if Intl.Segmenter fails
+  }
+
+  // 4. Critical safety: never split in the middle of a Unicode combining mark sequence (\p{M})
+  let safeLimit = limit;
+  while (safeLimit > cursor && /^\p{M}/u.test(text.slice(safeLimit, safeLimit + 1))) {
+    safeLimit--;
+  }
+  return safeLimit > cursor ? safeLimit : limit;
+}
+
 /**
  * Cuts a character range into requests no longer than the ceiling.
  *
- * The cuts fall on a space when there is one nearby, so a request rarely
+ * The cuts fall on a word boundary or space when there is one nearby, so a request rarely
  * begins in the middle of a word; the ranges are taken from the source, so
  * the highlighting offsets stay exact.
  *
@@ -349,17 +419,18 @@ const CHUNK_TARGET_RATIO = 0.85;
  * @param {Array<{ charStart: number, charEnd: number }>} groups
  * @param {number} ceiling
  * @param {number} target
+ * @param {string} [locale]
  * @returns {Array<{ text: string, charStart: number, charEnd: number }>}
  */
-function splitToCeiling(text, groups, ceiling, target) {
+function splitToCeiling(text, groups, ceiling, target, locale = 'en-US') {
   const chunks = [];
 
   for (const group of groups) {
     let cursor = group.charStart;
     while (group.charEnd - cursor > ceiling) {
       const limit = cursor + ceiling;
-      const space = text.lastIndexOf(' ', limit);
-      const cut = space > cursor + target / 2 ? space + 1 : limit;
+      const minCut = cursor + target / 2;
+      const cut = findCleanCut(text, cursor, limit, minCut, locale);
       chunks.push({ charStart: cursor, charEnd: cut, text: text.slice(cursor, cut) });
       cursor = cut;
     }
@@ -404,7 +475,13 @@ export function buildChunks(text, locale = 'en-US', rate = currentRate) {
   const target = Math.round(ceiling * CHUNK_TARGET_RATIO);
 
   if (getSettings().speechChunk !== 'sentence') {
-    const chunks = splitToCeiling(text, [{ charStart: 0, charEnd: text.length }], ceiling, target);
+    const chunks = splitToCeiling(
+      text,
+      [{ charStart: 0, charEnd: text.length }],
+      ceiling,
+      target,
+      locale
+    );
     return chunks.length > 0 ? chunks : [{ text, charStart: 0, charEnd: text.length }];
   }
 
@@ -451,7 +528,7 @@ export function buildChunks(text, locale = 'en-US', rate = currentRate) {
   }
   close();
 
-  const chunks = splitToCeiling(text, groups, ceiling, target);
+  const chunks = splitToCeiling(text, groups, ceiling, target, locale);
 
   if (chunks.length > 0) return chunks;
   return text.trim() ? [{ text, charStart: 0, charEnd: text.length }] : [];
@@ -1279,7 +1356,7 @@ const CHUNK_RETRY_LIMIT = 3;
 /** How many requests the engine may hold: one speaking, one warming up. */
 const PREFETCH_DEPTH = 2;
 /** How quiet the engine may be before the watchdog takes it as lost. */
-const SILENCE_GRACE_MS = 1800;
+const SILENCE_GRACE_MS = 2500;
 /** A chunk is never longer than this; silence past it means a stuck engine. */
 const STALL_MS = 13000;
 /** The pause before a failed chunk is asked for again. */
@@ -1343,7 +1420,14 @@ function pumpChunks(sessionId) {
   while (chunkCursor - chunkDone < PREFETCH_DEPTH && chunkCursor < chunkQueue.length) {
     const index = chunkCursor;
     chunkCursor += 1;
-    speakChunk(chunkQueue[index], index, sessionId);
+    const chunk = chunkQueue[index];
+    // Skip chunks containing no pronounceable letters or numbers (e.g. symbol-only dividers)
+    // to prevent browser speech synthesis engine stalls or error cascades.
+    if (!chunk || !/[\p{L}\p{N}]/u.test(chunk.text)) {
+      chunkDone = Math.max(chunkDone, index + 1);
+      continue;
+    }
+    speakChunk(chunk, index, sessionId);
   }
 
   if (chunkDone >= chunkQueue.length && chunkCursor >= chunkQueue.length && !hasMoreSpeech) {
@@ -1407,6 +1491,12 @@ function speakChunk(chunk, index, sessionId) {
     noteProgress();
     const active = tokens[currentWordIndex];
     if (active?.element) active.element.classList.remove('speaking-target');
+
+    // For voices that do not emit word boundaries (Edge Online Natural voices, Thai voices):
+    // align the active word to the chunk start so highlight and auto-scroll advance naturally.
+    const startTokenIndex = findTokenByCharIndex(chunk.charStart);
+    if (startTokenIndex >= 0) setActiveWord(startTokenIndex);
+
     notifyState({ isPlaying: true, isPaused: false, starting: false });
     clearStartWatchdog();
     // This chunk is playing now — keep the queue one request ahead.
@@ -1432,9 +1522,16 @@ function speakChunk(chunk, index, sessionId) {
     // Chunks finish in order; an `onend` from a chunk that was cancelled and
     // handed over again must not count as progress.
     lastEventAt = Date.now();
-    if (index === chunkDone) chunkDone += 1;
+    chunkDone = Math.max(chunkDone, index + 1);
     chunkRetries = 0;
     noteProgress();
+
+    // Advance active word to chunk end if boundary events were omitted by the synthesizer
+    const endTokenIndex = findTokenByCharIndex(chunk.charEnd);
+    if (endTokenIndex >= 0 && endTokenIndex > currentWordIndex) {
+      setActiveWord(endTokenIndex);
+    }
+
     schedulePump(sessionId);
   };
 
@@ -1447,13 +1544,25 @@ function speakChunk(chunk, index, sessionId) {
 
     // Our own `cancel()` — a new session, or a chunk handed over again — is
     // not an error.
-    if (event.error === 'canceled') return;
+    if (event.error === 'canceled') {
+      if (isStarting && liveUtterances.size === 0) {
+        isStarting = false;
+        notifyState({ starting: false });
+      }
+      return;
+    }
 
     if (event.error === 'interrupted') {
-      // The browser's speech synthesis engine was taken over or interrupted
-      // by another feature or tab (e.g. Edge browser's native Read Aloud).
-      // Pause MarkAu gracefully instead of retrying and conflicting with it.
-      pause();
+      if (isPlaying && !isStarting) {
+        // The browser's speech synthesis engine was taken over or interrupted
+        // mid-playback by another feature or tab (e.g. Edge browser's native Read Aloud).
+        // Pause MarkAu gracefully instead of retrying and conflicting with it.
+        pause();
+      } else {
+        // Interrupted during initial start/buffer drain (e.g. async cancel collision in Chromium).
+        // Retry from this chunk so the reader is not stuck in a disabled "starting" state.
+        retryFromChunk(index, sessionId);
+      }
       return;
     }
 
@@ -1487,7 +1596,11 @@ function retryFromChunk(index, sessionId) {
     chunkRetries = 0;
     chunkCursor = Math.max(chunkCursor, index + 1);
     chunkDone = Math.max(chunkDone, index + 1);
-    schedulePump(sessionId);
+    if (chunkDone >= chunkQueue.length && !hasMoreSpeech) {
+      finishPlayback();
+    } else {
+      schedulePump(sessionId);
+    }
     return;
   }
 
@@ -1560,13 +1673,23 @@ function finishPlayback() {
 function speakFromWord(wordIndex = 0) {
   if (!('speechSynthesis' in window)) {
     console.error('Web Speech API is not supported in this browser.');
+    isStarting = false;
+    notifyState({ starting: false, isPlaying: false });
     return;
   }
 
   if (tokensAreStale || tokens.length === 0) {
-    if (!ensureStartWindow()) return;
+    if (!ensureStartWindow()) {
+      isStarting = false;
+      notifyState({ starting: false, isPlaying: false });
+      return;
+    }
   }
-  if (tokens.length === 0) return;
+  if (tokens.length === 0) {
+    isStarting = false;
+    notifyState({ starting: false, isPlaying: false });
+    return;
+  }
 
   const targetIndex = Math.max(0, Math.min(tokens.length - 1, wordIndex));
   const targetToken = tokens[targetIndex];
@@ -1580,6 +1703,7 @@ function speakFromWord(wordIndex = 0) {
   clearPumpTimer();
   chunkRetries = 0;
   lastEventAt = Date.now();
+  lastProgressAt = Date.now();
   // The cross-tab hand-shake is optional.
   if (getSettings().pauseOtherTabs) announceNarrationStart();
 
@@ -1604,6 +1728,8 @@ function speakFromWord(wordIndex = 0) {
     if (targetToken.element) {
       targetToken.element.classList.remove('speaking-target');
     }
+    isStarting = false;
+    notifyState({ starting: false, isPlaying: false });
     return;
   }
 
@@ -1816,10 +1942,15 @@ function startStartWatchdog(sessionId, attempt = 0) {
     if (sessionId !== currentSessionId) return;
     if (isPlaying || isPaused) return;
 
+    const api = window.speechSynthesis;
+    // If pending in browser queue, nudge resume to wake Chromium's audio dispatcher
+    if (api.pending && !api.speaking && !api.paused) {
+      api.resume();
+    }
+
     // A slow engine may still be preparing the voice (network voices can
     // take a few seconds on the first sentence) — that is not a failure.
-    const api = window.speechSynthesis;
-    if ((api.speaking || api.pending) && attempt < 5) {
+    if ((api.speaking || api.pending) && attempt < 2) {
       startStartWatchdog(sessionId, attempt + 1);
       return;
     }
@@ -1843,7 +1974,7 @@ function startStartWatchdog(sessionId, attempt = 0) {
       starting: false,
       reason: 'no-start'
     });
-  }, 5000);
+  }, 2500);
 }
 
 function clearStartWatchdog() {
@@ -1887,11 +2018,18 @@ export function reconcileWithSpeechApi() {
   // boundary events are doing. Some voices never fire them at all.
   if (api.speaking || api.pending) {
     // If the browser reports activity but we have no active utterances of our own,
-    // that speech belongs to Edge browser's native Read Aloud or another tab.
-    // Pause MarkAu so we do not interrupt or conflict with the other speech.
-    if (liveUtterances.size === 0) {
+    // and MarkAu has no remaining chunks or pending pumps, that speech belongs
+    // to Edge browser's native Read Aloud or another tab.
+    if (liveUtterances.size === 0 && chunkDone >= chunkQueue.length && !pumpTimer) {
       pause();
       return;
+    }
+
+    // Unstick Chromium if an utterance is pending while audio has gone silent:
+    // When multiple utterances are queued, Chromium sometimes stalls in pending
+    // state until resume() is nudged.
+    if (api.pending && !api.speaking && !api.paused && Date.now() - lastProgressAt > 1500) {
+      api.resume();
     }
 
     // A chunk never lasts longer than the stall threshold, so an engine that
@@ -1913,7 +2051,7 @@ export function reconcileWithSpeechApi() {
   }
 
   // If another speech engine or tab is active while our queue is empty, do not wake MarkAu.
-  if (api.speaking && liveUtterances.size === 0) {
+  if (api.speaking && liveUtterances.size === 0 && chunkDone >= chunkQueue.length) {
     pause();
     return;
   }
@@ -1931,7 +2069,7 @@ export function reconcileWithSpeechApi() {
 
   // Nothing is left to speak: the last onend was swallowed, so just close
   // the session instead of starting the final sentence again.
-  if (chunkDone >= chunkQueue.length) {
+  if (chunkDone >= chunkQueue.length && !hasMoreSpeech) {
     finishPlayback();
     return;
   }

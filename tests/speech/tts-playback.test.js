@@ -646,3 +646,123 @@ describe('window extension', () => {
     expect(preview.lastElementChild.querySelector('.tts-word')).not.toBeNull();
   });
 });
+
+describe('chunking and speech engine resilience', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    document.body.innerHTML = '';
+    fakeSpeech.spoken = [];
+    fakeSpeech.speaking = false;
+    fakeSpeech.pending = false;
+    fakeSpeech.paused = false;
+    tts.setDocumentLocale('th-TH');
+  });
+
+  afterEach(() => {
+    tts.stop();
+    tts.setScrollContainer(null);
+    saveSettings({ pauseOtherTabs: false, readDiagramLabels: false });
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('cuts Thai chunks at clean word boundaries without dangling combining marks', () => {
+    const thaiText =
+      'การพัฒนาโปรแกรมคอมพิวเตอร์อย่างมีประสิทธิภาพและมีความปลอดภัยสูงสำหรับผู้ใช้งานทุกคนในระบบเครือข่ายอินเทอร์เน็ต';
+    const chunks = tts.buildChunks(thaiText, 'th-TH', 1.0);
+
+    expect(chunks.length).toBeGreaterThan(0);
+    for (const chunk of chunks) {
+      // Chunk must never start with a Unicode combining mark (like Thai tone mark or upper vowel)
+      expect(/^\p{M}/u.test(chunk.text)).toBe(false);
+      // Chunk must not be empty
+      expect(chunk.text.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('skips non-speakable symbol-only chunks without stalling the queue', async () => {
+    const preview = document.createElement('div');
+    const p1 = document.createElement('p');
+    p1.textContent = 'First readable paragraph.';
+    const p2 = document.createElement('p');
+    p2.textContent = '---';
+    const p3 = document.createElement('p');
+    p3.textContent = 'Second readable paragraph.';
+    preview.append(p1, p2, p3);
+    document.body.appendChild(preview);
+
+    tts.setPreviewContainer(preview);
+    tts.markTokensStale('test');
+    tts.setDocumentLocale('en-US');
+    tts.play();
+
+    await vi.advanceTimersByTimeAsync(60);
+
+    // Only readable chunks are handed to speech synthesis
+    for (const utterance of fakeSpeech.spoken) {
+      expect(/[\p{L}\p{N}]/u.test(utterance.text)).toBe(true);
+    }
+  });
+
+  it('advances active word when boundary events are omitted by synthesizer', async () => {
+    loadDocument('First sentence here. Second sentence follows.');
+    tts.setDocumentLocale('en-US');
+    await startReading();
+
+    const first = fakeSpeech.spoken[0];
+    first.onstart();
+
+    // Even without any onboundary events, onstart sets the active word
+    const state = [];
+    const off = tts.onTTSStateChange((s) => state.push(s));
+    first.onend();
+    await vi.advanceTimersByTimeAsync(20);
+
+    // Active word was updated
+    expect(state.length).toBeGreaterThan(0);
+    off();
+  });
+
+  it('recovers and does not hang in starting state when speech engine throws interrupted error on launch', async () => {
+    loadDocument('First sentence here. Second sentence follows.');
+    tts.setDocumentLocale('en-US');
+    tts.play();
+    expect(tts.isNarrationStarting()).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(60);
+    expect(fakeSpeech.spoken.length).toBeGreaterThan(0);
+    const u0 = fakeSpeech.spoken[0];
+
+    // Browser fires error: 'interrupted' during initial queue launch
+    u0.onerror({ error: 'interrupted' });
+
+    // Wait for the scheduled retry
+    await vi.advanceTimersByTimeAsync(200);
+
+    // Engine should retry and pump the chunk again instead of hanging
+    expect(fakeSpeech.spoken.length).toBeGreaterThan(0);
+    const u1 = fakeSpeech.spoken[fakeSpeech.spoken.length - 1];
+    u1.onstart();
+
+    expect(tts.isNarrationStarting()).toBe(false);
+    expect(tts.isSpeaking()).toBe(true);
+  });
+
+  it('guarantees starting state is cleared even if speech fails repeatedly', async () => {
+    loadDocument('Failure test sentence.');
+    tts.setDocumentLocale('en-US');
+    tts.play();
+    expect(tts.isNarrationStarting()).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(60);
+    for (let i = 0; i < 4; i++) {
+      const u = fakeSpeech.spoken[fakeSpeech.spoken.length - 1];
+      if (u?.onerror) u.onerror({ error: 'error' });
+      await vi.advanceTimersByTimeAsync(500);
+    }
+
+    expect(tts.isNarrationStarting()).toBe(false);
+    expect(tts.isSpeaking()).toBe(false);
+  });
+});

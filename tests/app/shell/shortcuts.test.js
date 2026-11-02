@@ -11,29 +11,69 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-vi.mock('@/speech/tts.js', () => ({ stop: vi.fn(), isSpeaking: () => false }));
-vi.mock('@/app/editor/editor.js', () => ({
+const mockTts = {
+  stop: vi.fn(),
+  isSpeaking: vi.fn(() => false),
+  isNarrationStarting: vi.fn(() => false)
+};
+vi.mock('@/speech/tts.js', () => mockTts);
+
+const mockEditor = {
   applyFormat: vi.fn(),
   flushDraft: vi.fn()
-}));
-vi.mock('@/app/preview/narration.js', () => ({ toggleNarration: () => 'paused' }));
-vi.mock('@/app/shell/layout.js', () => ({ setView: vi.fn() }));
-vi.mock('@/app/editor/paste.js', () => ({ pasteFromClipboard: vi.fn() }));
-vi.mock('@/app/import/url-import.js', () => ({ openDialog: vi.fn() }));
-vi.mock('@/app/translate/translate.js', () => ({ openDialog: vi.fn() }));
-vi.mock('@/app/history/dialog.js', () => ({
-  openDialog: vi.fn(),
-  captureNow: () => ({ added: false })
-}));
+};
+vi.mock('@/app/editor/editor.js', () => mockEditor);
 
-document.body.innerHTML = '<textarea id="editor"></textarea><button id="btn-new-tab"></button>';
+const mockNarration = {
+  toggleNarration: vi.fn(() => 'paused'),
+  cancelPendingStart: vi.fn(() => false)
+};
+vi.mock('@/app/preview/narration.js', () => mockNarration);
+
+const mockLayout = {
+  setView: vi.fn()
+};
+vi.mock('@/app/shell/layout.js', () => mockLayout);
+
+const mockPaste = {
+  pasteFromClipboard: vi.fn()
+};
+vi.mock('@/app/editor/paste.js', () => mockPaste);
+
+const mockUrlImport = {
+  openDialog: vi.fn()
+};
+vi.mock('@/app/import/url-import.js', () => mockUrlImport);
+
+const mockTranslate = {
+  openDialog: vi.fn()
+};
+vi.mock('@/app/translate/translate.js', () => mockTranslate);
+
+const mockHistory = {
+  openDialog: vi.fn(),
+  captureNow: vi.fn(() => ({ added: false }))
+};
+vi.mock('@/app/history/dialog.js', () => mockHistory);
+
+document.body.innerHTML = `
+  <textarea id="editor"></textarea>
+  <button id="btn-new-tab"></button>
+  <div id="preview"></div>
+  <input type="checkbox" id="check-box" />
+  <input type="text" id="text-input" />
+`;
 
 const { initShortcuts } = await import('@/app/shell/shortcuts.js');
 const { el } = await import('@/app/shell/dom.js');
 
 /** @param {KeyboardEventInit} init */
+function pressOn(target, init) {
+  target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+}
+
 function press(init) {
-  document.getElementById('editor').dispatchEvent(new KeyboardEvent('keydown', init));
+  pressOn(document.getElementById('editor'), init);
 }
 
 describe('the new tab shortcut', () => {
@@ -84,5 +124,128 @@ describe('the new tab shortcut', () => {
 
     expect(window.open).not.toHaveBeenCalled();
     delete el.modalSettings;
+  });
+});
+
+describe('formatting shortcuts in editor', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    initShortcuts();
+  });
+
+  it('applies bold on Ctrl+B inside editor', () => {
+    press({ key: 'b', ctrlKey: true, bubbles: true });
+    expect(mockEditor.applyFormat).toHaveBeenCalledWith('bold');
+  });
+
+  it('applies italic on Ctrl+I inside editor', () => {
+    press({ key: 'i', ctrlKey: true, bubbles: true });
+    expect(mockEditor.applyFormat).toHaveBeenCalledWith('italic');
+  });
+
+  it('saves document on Ctrl+S inside editor', () => {
+    press({ key: 's', ctrlKey: true, bubbles: true });
+    expect(mockEditor.flushDraft).toHaveBeenCalled();
+    expect(mockHistory.captureNow).toHaveBeenCalled();
+  });
+});
+
+describe('space key narration toggle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    initShortcuts();
+  });
+
+  it('toggles narration on Space outside editor', () => {
+    const preview = document.getElementById('preview');
+    pressOn(preview, { code: 'Space', bubbles: true });
+    expect(mockNarration.toggleNarration).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not toggle narration when Space is pressed in editor', () => {
+    press({ code: 'Space', bubbles: true });
+    expect(mockNarration.toggleNarration).not.toHaveBeenCalled();
+  });
+
+  it('does not toggle narration when Space is pressed on checkbox', () => {
+    const checkbox = document.getElementById('check-box');
+    pressOn(checkbox, { code: 'Space', bubbles: true });
+    expect(mockNarration.toggleNarration).not.toHaveBeenCalled();
+  });
+
+  it('does not toggle narration when Space is pressed in text input', () => {
+    const textInput = document.getElementById('text-input');
+    pressOn(textInput, { code: 'Space', bubbles: true });
+    expect(mockNarration.toggleNarration).not.toHaveBeenCalled();
+  });
+});
+
+describe('escape key stop narration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    initShortcuts();
+  });
+
+  it('stops reading on Escape when speech is active', () => {
+    mockTts.isSpeaking.mockReturnValue(true);
+    const preview = document.getElementById('preview');
+    pressOn(preview, { key: 'Escape', bubbles: true });
+    expect(mockTts.stop).toHaveBeenCalledWith('user');
+  });
+});
+
+describe('view shortcuts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    initShortcuts();
+  });
+
+  it('sets view to edit on 1', () => {
+    const preview = document.getElementById('preview');
+    pressOn(preview, { key: '1', bubbles: true });
+    expect(mockLayout.setView).toHaveBeenCalledWith('edit');
+  });
+
+  it('sets view to split on 2', () => {
+    const preview = document.getElementById('preview');
+    pressOn(preview, { key: '2', bubbles: true });
+    expect(mockLayout.setView).toHaveBeenCalledWith('split');
+  });
+
+  it('sets view to preview on 3', () => {
+    const preview = document.getElementById('preview');
+    pressOn(preview, { key: '3', bubbles: true });
+    expect(mockLayout.setView).toHaveBeenCalledWith('preview');
+  });
+});
+
+describe('dialog shortcuts outside editor', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    initShortcuts();
+  });
+
+  it('opens history on Ctrl+Shift+H', () => {
+    const preview = document.getElementById('preview');
+    pressOn(preview, { key: 'h', ctrlKey: true, shiftKey: true, bubbles: true });
+    expect(mockHistory.openDialog).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens translate on Ctrl+Shift+L', () => {
+    const preview = document.getElementById('preview');
+    pressOn(preview, { key: 'l', ctrlKey: true, shiftKey: true, bubbles: true });
+    expect(mockTranslate.openDialog).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens url import on Ctrl+Shift+U', () => {
+    const preview = document.getElementById('preview');
+    pressOn(preview, { key: 'u', ctrlKey: true, shiftKey: true, bubbles: true });
+    expect(mockUrlImport.openDialog).toHaveBeenCalledTimes(1);
+  });
+
+  it('triggers paste on Ctrl+Shift+V', () => {
+    const preview = document.getElementById('preview');
+    pressOn(preview, { key: 'v', ctrlKey: true, shiftKey: true, bubbles: true });
+    expect(mockPaste.pasteFromClipboard).toHaveBeenCalledTimes(1);
   });
 });
